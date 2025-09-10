@@ -261,4 +261,4 @@ graph TB
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=momomo623/RAGEval&type=Date)](https://www.star-history.com/#momomo623/RAGEval&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=BytePioneer-AI/RAGEval&type=Date)](https://www.star-history.com/#BytePioneer-AI/RAGEval&Date)
