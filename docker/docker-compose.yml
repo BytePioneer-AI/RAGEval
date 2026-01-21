@@ -7,7 +7,6 @@ services:
     container_name: rag-eval-db
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-      - ./sql.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -39,7 +38,7 @@ services:
     depends_on:
       database:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: /bin/sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     restart: unless-stopped
       
   # Caddy Web服务器

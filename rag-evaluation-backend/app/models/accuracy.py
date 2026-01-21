@@ -41,6 +41,9 @@ class AccuracyTest(Base):
     # 评测结果汇总
     results_summary = Column(JSONB)
     
+    # 评测提示词
+    prompt = Column(Text)
+    
     # 时间信息
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     started_at = Column(DateTime(timezone=True))

@@ -9,7 +9,8 @@ import uuid
 
 from app.api.deps import get_current_active_admin, get_current_user, get_db, get_current_active_user
 from app.core.security import get_password_hash, verify_password
-from app.models.user import User, ApiKey
+from app.models.user import User
+from app.models.api_key import ApiKey
 from app.schemas.user import UserCreate, UserUpdate, UserOut, ApiKeyCreate, ApiKeyUpdate, ApiKeyOut
 from app.services.user_service import (
     get_user, 

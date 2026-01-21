@@ -7,7 +7,7 @@ asttokens==3.0.0
 async-timeout==5.0.1
 attrs==25.3.0
 backcall==0.2.0
-bcrypt==4.3.0
+bcrypt==3.2.2
 beautifulsoup4==4.13.3
 billiard==4.2.1
 bleach==6.2.0

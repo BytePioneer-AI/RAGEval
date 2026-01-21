@@ -81,9 +81,12 @@ npm install
 npm run dev
 
 # 6. 数据库
-手动安装需要自行准备PostgreSQL数据库。然后执行SQL文件进行初始化：docker/sql.sql
-后端服务默认：数据库账户密码：postgres/postgres、数据库名：rag_evaluation
-后端配置路径：rag-evaluation-backend/app/core/config.py
+手动安装需要自行准备 PostgreSQL 数据库并创建数据库（默认：rag_evaluation）。
+可在 `rag-evaluation-backend/.env` 配置 `DATABASE_URL` 或 `POSTGRES_*` 参数。
+然后执行 Alembic 迁移初始化表结构：
+alembic upgrade head
+或直接运行初始化脚本（创建数据库并迁移）：
+python app/db/init_db.py
 
 # 7. 访问应用
 http://localhost:5173

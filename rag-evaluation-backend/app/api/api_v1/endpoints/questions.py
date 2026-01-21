@@ -184,7 +184,7 @@ async def generate_questions(
         raise HTTPException(status_code=403, detail="无权限在此项目中生成问题")
     
     # 获取用户API密钥
-    from app.models.user import ApiKey
+    from app.models.api_key import ApiKey
     api_key = db.query(ApiKey).filter(
         ApiKey.user_id == current_user.id,
         ApiKey.provider == req.model_provider,

@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, ARRAY, JSON
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, foreign
 import uuid
 
 from app.db.base import Base
@@ -23,4 +23,9 @@ class Question(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # 添加反向关系
-    rag_answers = relationship("RagAnswer", back_populates="question", cascade="all, delete-orphan") 
+    rag_answers = relationship(
+        "RagAnswer",
+        primaryjoin="Question.id == foreign(RagAnswer.question_id)",
+        back_populates="question",
+        cascade="all, delete-orphan",
+    )

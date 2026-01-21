@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 import uuid
 
@@ -27,4 +27,8 @@ class ProjectDataset(Base):
     id = Column(StringUUID, primary_key=True, default=uuid.uuid4)
     project_id = Column(StringUUID, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     dataset_id = Column(StringUUID, ForeignKey("datasets.id", ondelete="RESTRICT"), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint('project_id', 'dataset_id', name='unique_project_dataset'),
+    ) 

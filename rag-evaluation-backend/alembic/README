@@ -1,0 +1,15 @@
+Alembic 数据库迁移目录
+
+此目录包含 Alembic 数据库迁移脚本。
+
+目录结构:
+- env.py: Alembic 环境配置
+- script.py.mako: 迁移脚本模板
+- versions/: 迁移版本文件目录
+
+常用命令:
+- alembic revision --autogenerate -m "描述": 自动生成迁移脚本
+- alembic upgrade head: 升级到最新版本
+- alembic downgrade -1: 回滚一个版本
+- alembic current: 查看当前版本
+- alembic history: 查看迁移历史

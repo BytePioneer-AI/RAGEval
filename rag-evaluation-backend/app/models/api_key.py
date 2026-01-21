@@ -1,5 +1,4 @@
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
 
@@ -13,7 +12,7 @@ class ApiKey(Base):
     id = Column(StringUUID, primary_key=True, default=uuid.uuid4)
     user_id = Column(StringUUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(100), nullable=False)
-    key = Column(String(255), nullable=False)
+    key = Column(String(100), unique=True, nullable=False)  # SQL: varchar(100) unique
     provider = Column(String(50), nullable=False)  # openai, anthropic, etc.
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

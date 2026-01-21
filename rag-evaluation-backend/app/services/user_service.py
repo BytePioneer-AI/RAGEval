@@ -3,7 +3,8 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
-from app.models.user import User, ApiKey
+from app.models.user import User
+from app.models.api_key import ApiKey
 from app.schemas.user import UserCreate, UserUpdate
 from app.schemas.api_key import ApiKeyCreate, ApiKeyUpdate
 

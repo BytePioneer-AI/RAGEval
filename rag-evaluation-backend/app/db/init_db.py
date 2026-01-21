@@ -3,6 +3,7 @@
 import os
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import subprocess
 import sys
 
 # 添加项目根目录到Python路径
@@ -10,23 +11,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from app.core.config import settings
 
-def run_sql_file(conn, filepath):
-    """执行SQL文件内容"""
-    print(f"执行SQL文件: {filepath}")
-    with open(filepath, 'r') as f:
-        sql = f.read()
-    
-    cursor = conn.cursor()
+def run_alembic_upgrade():
+    """运行 Alembic 迁移"""
+    print("运行 Alembic 迁移: alembic upgrade head")
     try:
-        cursor.execute(sql)
-        conn.commit()
-        print("SQL执行成功")
-    except Exception as e:
-        conn.rollback()
-        print(f"SQL执行失败: {e}")
-        raise
-    finally:
-        cursor.close()
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
+        print("Alembic 迁移执行成功")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Alembic 迁移执行失败: {e}")
+        return False
 
 def create_database():
     """创建数据库"""
@@ -58,26 +52,9 @@ def create_database():
         print(f"创建数据库时出错: {e}")
         return False
 
-def create_tables():
-    """创建数据库表"""
-    try:
-        # 连接到rag_evaluation数据库
-        conn = psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD,
-            database=settings.POSTGRES_DB
-        )
-        
-        # 执行create_tables.sql文件
-        sql_file_path = os.path.join(os.path.dirname(__file__), 'create_tables.sql')
-        run_sql_file(conn, sql_file_path)
-        
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"创建表时出错: {e}")
-        return False
+def init_schema():
+    """使用 Alembic 初始化/更新表结构"""
+    return run_alembic_upgrade()
 
 def reset_database():
     """重置数据库(删除并重新创建)"""
@@ -107,7 +84,7 @@ def reset_database():
         conn.close()
         
         # 重新创建数据库和表
-        return create_database() and create_tables()
+        return create_database() and init_schema()
     except Exception as e:
         print(f"重置数据库时出错: {e}")
         return False
@@ -118,4 +95,4 @@ if __name__ == "__main__":
         reset_database()
     else:
         if create_database():
-            create_tables() 
+            init_schema()

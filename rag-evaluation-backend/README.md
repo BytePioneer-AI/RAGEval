@@ -27,6 +27,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ## 📁 项目结构
 
 ```
+alembic/                # 数据库迁移
+│   ├── env.py          # Alembic 环境配置
+│   ├── script.py.mako  # 迁移脚本模板
+│   └── versions/       # 迁移版本文件
+alembic.ini             # Alembic 配置文件
 app/
 ├── api/                 # API接口层
 │   ├── api_v1/         # API版本1
@@ -82,6 +87,50 @@ app/
 - **create.sql**: 数据库创建脚本，包含表结构定义
 - **init_db.py**: 数据库初始化脚本，用于创建初始数据库结构
 - **seed_db.py**: 数据填充脚本，用于填充测试或初始数据
+
+## 数据库迁移 (Alembic)
+
+项目使用 Alembic 管理数据库迁移。
+
+### 常用命令
+
+```bash
+# 查看当前数据库版本
+alembic current
+
+# 查看迁移历史
+alembic history
+
+# 升级到最新版本
+alembic upgrade head
+
+# 回滚一个版本
+alembic downgrade -1
+
+# 自动生成迁移脚本（基于模型变更）
+alembic revision --autogenerate -m "描述变更内容"
+
+# 手动创建空迁移脚本
+alembic revision -m "描述变更内容"
+
+# 标记当前数据库为指定版本（不执行迁移）
+alembic stamp head
+```
+
+### 首次使用
+
+如果数据库已通过 `create.sql` 初始化，需要标记基线版本：
+
+```bash
+alembic stamp 0001
+```
+
+### 开发流程
+
+1. 修改 `app/models/` 中的模型定义
+2. 运行 `alembic revision --autogenerate -m "描述"` 生成迁移脚本
+3. 检查生成的迁移脚本，确保正确
+4. 运行 `alembic upgrade head` 应用迁移
 
 ## 数据模型 (app/models/)
 
