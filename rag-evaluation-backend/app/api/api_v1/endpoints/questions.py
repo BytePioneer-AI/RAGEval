@@ -1,9 +1,7 @@
-from datetime import time
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-import uuid
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
@@ -13,11 +11,8 @@ from app.schemas.question import (
     QuestionCreate, 
     QuestionUpdate, 
     QuestionOut, 
-    QuestionBatchCreate,
-    QuestionGenerateRequest,
-    QuestionGenerateResponse
+    QuestionBatchCreate
 )
-from app.services.llm_service import QuestionGenerator
 from app.services.question_service import (
     create_question,
     get_question,
@@ -165,71 +160,3 @@ def delete_question_api(
     
     delete_question(db, question_id=question_id)
     return {"detail": "问题已删除"}
-
-@router.post("/generate", response_model=QuestionGenerateResponse)
-async def generate_questions(
-    *,
-    db: Session = Depends(get_db),
-    req: QuestionGenerateRequest = Body(...),
-    current_user: User = Depends(get_current_user)
-) -> Any:
-    """
-    使用AI生成问答对
-    """
-    # 检查项目权限
-    project = db.query(Project).filter(Project.id == req.project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目未找到")
-    if project.user_id != current_user.id and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="无权限在此项目中生成问题")
-    
-    # 获取用户API密钥
-    from app.models.api_key import ApiKey
-    api_key = db.query(ApiKey).filter(
-        ApiKey.user_id == current_user.id,
-        ApiKey.provider == req.model_provider,
-        ApiKey.is_active == True
-    ).first()
-    
-    if not api_key:
-        raise HTTPException(status_code=400, detail=f"未找到有效的{req.model_provider}API密钥")
-    
-    # 生成问答对
-    generator = QuestionGenerator(api_key=api_key.key, model=req.model)
-    qa_pairs = await generator.generate_qa_pairs(
-        content=req.content,
-        count=req.count,
-        difficulty=req.difficulty,
-        types=req.question_types
-    )
-    
-    if not qa_pairs:
-        raise HTTPException(status_code=500, detail="生成问答对失败")
-    
-    # 如果需要直接保存到数据库
-    if req.save_to_project:
-        questions = []
-        for qa in qa_pairs:
-            question_data = QuestionCreate(
-                project_id=req.project_id,
-                question_text=qa["question"],
-                standard_answer=qa["answer"],
-                category=qa["type"],
-                difficulty=qa.get("difficulty", req.difficulty),
-                tags=qa.get("tags", None),
-                question_metadata={"generated": True, "generation_time": time.time()}
-            )
-            question = create_question(db, obj_in=question_data)
-            questions.append(question)
-        
-        return {
-            "generated_questions": qa_pairs,
-            "saved_questions": [QuestionOut.from_orm(q) for q in questions],
-            "count": len(questions)
-        }
-    
-    return {
-        "generated_questions": qa_pairs,
-        "saved_questions": [],
-        "count": len(qa_pairs)
-    } 

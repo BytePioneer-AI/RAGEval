@@ -56,23 +56,6 @@ class QuestionBatchCreate(BaseModel):
     dataset_id: str
     questions: List[QuestionBase]
 
-# 问题生成请求
-class QuestionGenerateRequest(BaseModel):
-    content: str
-    count: int = 5
-    difficulty: Optional[str] = "medium"
-    question_types: Optional[List[str]] = ["factual", "conceptual", "applied"]
-    model: str = "gpt-4"
-    model_provider: str = "openai"
-    save_to_dataset: bool = False
-    dataset_id: Optional[str] = None
-
-# 问题生成响应
-class QuestionGenerateResponse(BaseModel):
-    generated_questions: List[Dict[str, Any]]
-    saved_questions: List[QuestionOut] = Field(default_factory=list)
-    count: int
-
 # 新增的批量删除请求模式
 class BatchDeleteRequest(BaseModel):
     """批量删除问题的请求模型"""
