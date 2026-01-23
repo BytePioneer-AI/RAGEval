@@ -2,7 +2,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func
 
 from app.api.deps import get_current_user, get_current_active_admin, get_db
 from app.models.user import User
@@ -19,7 +19,9 @@ from app.schemas.common import PaginatedResponse
 from app.services.dataset_service import (
     create_dataset,
     get_dataset,
-    get_datasets_by_user,
+    build_dataset_query,
+    get_question_counts_by_dataset_ids,
+    serialize_dataset,
     update_dataset,
     delete_dataset,
     get_dataset_with_stats,
@@ -46,25 +48,17 @@ def read_all_datasets(
     datasets = db.query(Dataset).all()
 
     # 为每个数据集添加问题数量，并转换UUID为字符串
-    result = []
-    for dataset in datasets:
-        question_count = db.query(func.count(Question.id)).filter(
-            Question.dataset_id == dataset.id
-        ).scalar()
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
 
-        dataset_dict = {
-            "id": str(dataset.id),
-            "user_id": str(dataset.user_id),
-            "name": dataset.name,
-            "description": dataset.description,
-            "is_public": dataset.is_public,
-            "tags": dataset.tags or [],
-            "dataset_metadata": dataset.dataset_metadata or {},
-            "question_count": question_count,
-            "created_at": dataset.created_at,
-            "updated_at": dataset.updated_at
-        }
-        result.append(dataset_dict)
+    result = [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            mask_user_id=False,
+        )
+        for dataset in datasets
+    ]
 
     return result
 
@@ -81,18 +75,7 @@ def create_dataset_api(
     dataset = create_dataset(db, obj_in=dataset_in, user_id=str(current_user.id))
 
     # 手动转换返回值，确保UUID被转换为字符串
-    return {
-        "id": str(dataset.id),
-        "user_id": str(dataset.user_id),
-        "name": dataset.name,
-        "description": dataset.description,
-        "is_public": dataset.is_public,
-        "tags": dataset.tags or [],
-        "dataset_metadata": dataset.dataset_metadata or {},
-        "question_count": 0,  # 新创建的数据集没有问题
-        "created_at": dataset.created_at,
-        "updated_at": dataset.updated_at
-    }
+    return serialize_dataset(dataset, question_count=0, mask_user_id=False)
 
 @router.get("", response_model=PaginatedResponse[DatasetOut])
 def read_datasets(
@@ -129,85 +112,45 @@ def read_datasets(
         include_public = False
 
     # 获取数据集列表
-    datasets = get_datasets_by_user(
+    base_query = build_dataset_query(
         db,
         user_id=str(current_user.id),
-        skip=skip,
-        limit=size,
-        search=search,
         include_public=include_public,
         only_public=only_public,
         only_private=only_private,
         only_mine=only_mine,
-        tags=tag_list
+        tags=tag_list,
+        search=search,
+    )
+
+    datasets = (
+        base_query
+        .order_by(Dataset.user_id == str(current_user.id), Dataset.created_at.desc())
+        .offset(skip)
+        .limit(size)
+        .all()
     )
 
     # 计算总数（需要考虑筛选条件）
-    query = db.query(func.count(Dataset.id))
-
-    # 应用相同的筛选逻辑用于计算总数
-    if include_public:
-        if only_public:
-            query = query.filter(Dataset.is_public == True)
-        elif only_private:
-            query = query.filter(
-                Dataset.user_id == current_user.id,
-                Dataset.is_public == False
-            )
-        else:
-            query = query.filter(
-                or_(
-                    Dataset.user_id == current_user.id,
-                    Dataset.is_public == True
-                )
-            )
-    else:
-        query = query.filter(Dataset.user_id == current_user.id)
-        if only_private:
-            query = query.filter(Dataset.is_public == False)
-
-    # 应用标签筛选
-    if tag_list:
-        for tag in tag_list:
-            query = query.filter(Dataset.tags.contains([tag]))
-
-    # 应用搜索关键词
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            or_(
-                Dataset.name.ilike(search_term),
-                Dataset.description.ilike(search_term)
-            )
-        )
-
-    total = query.scalar()
+    total = base_query.count()
 
     # 计算总页数
     pages = (total + size - 1) // size if total > 0 else 1
 
     # 准备返回结果
-    result = []
-    for dataset in datasets:
-        # 获取此数据集的问题数量
-        question_count = db.query(func.count(Question.id)).filter(
-            Question.dataset_id == dataset.id
-        ).scalar()
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
 
-        dataset_dict = {
-            "id": str(dataset.id),
-            "user_id": str(dataset.user_id) if str(dataset.user_id) == str(current_user.id) else None,
-            "name": dataset.name,
-            "description": dataset.description,
-            "is_public": dataset.is_public,
-            "tags": dataset.tags or [],
-            "dataset_metadata": dataset.dataset_metadata or {},
-            "question_count": question_count,
-            "created_at": dataset.created_at,
-            "updated_at": dataset.updated_at,
-            "is_owner": str(dataset.user_id) == str(current_user.id)
-        }
-        result.append(dataset_dict)
+    result = [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            current_user_id=str(current_user.id),
+            mask_user_id=True,
+            include_is_owner=True,
+        )
+        for dataset in datasets
+    ]
 
     return {
         "items": result,
@@ -233,19 +176,14 @@ def read_public_datasets(
     tag_list = tags.split(",") if tags else None
 
     # 创建基础查询
-    query = db.query(Dataset).filter(Dataset.is_public == True)
-
-    if tag_list:
-        for tag in tag_list:
-            query = query.filter(Dataset.tags.contains([tag]))
-
-    if search:
-        query = query.filter(
-            or_(
-                Dataset.name.ilike(f"%{search}%"),
-                Dataset.description.ilike(f"%{search}%")
-            )
-        )
+    query = build_dataset_query(
+        db,
+        user_id=str(current_user.id),
+        include_public=True,
+        only_public=True,
+        tags=tag_list,
+        search=search,
+    )
 
     # 计算总数
     total = query.count()
@@ -255,25 +193,18 @@ def read_public_datasets(
     datasets = query.offset(offset).limit(size).all()
 
     # 为每个数据集添加问题数量，并转换UUID为字符串
-    result = []
-    for dataset in datasets:
-        question_count = db.query(func.count(Question.id)).filter(
-            Question.dataset_id == dataset.id
-        ).scalar()
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
 
-        dataset_dict = {
-            "id": str(dataset.id),
-            "user_id": str(dataset.user_id) if str(dataset.user_id) == str(current_user.id) else None,
-            "name": dataset.name,
-            "description": dataset.description,
-            "is_public": dataset.is_public,
-            "tags": dataset.tags or [],
-            "dataset_metadata": dataset.dataset_metadata or {},
-            "question_count": question_count,
-            "created_at": dataset.created_at,
-            "updated_at": dataset.updated_at
-        }
-        result.append(dataset_dict)
+    result = [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            current_user_id=str(current_user.id),
+            mask_user_id=True,
+        )
+        for dataset in datasets
+    ]
 
     # 计算总页数
     pages = (total + size - 1) // size if total > 0 else 1
@@ -310,19 +241,14 @@ def read_dataset(
     result = get_dataset_with_stats(db, dataset_id)
 
     # 将result转换为schema需要的格式，明确转换UUID为字符串
-    return {
-        "id": str(result["dataset"].id),
-        "user_id": str(result["dataset"].user_id),
-        "name": result["dataset"].name,
-        "description": result["dataset"].description,
-        "is_public": result["dataset"].is_public,
-        "tags": result["dataset"].tags or [],
-        "dataset_metadata": result["dataset"].dataset_metadata or {},
-        "question_count": result["question_count"],
-        "created_at": result["dataset"].created_at,
-        "updated_at": result["dataset"].updated_at,
-        "projects": result["projects"]
-    }
+    response = serialize_dataset(
+        result["dataset"],
+        question_count=result["question_count"],
+        mask_user_id=False,
+    )
+    response["projects"] = result["projects"]
+
+    return response
 
 @router.put("/{dataset_id}", response_model=DatasetOut)
 def update_dataset_api(
@@ -351,18 +277,7 @@ def update_dataset_api(
     ).scalar()
 
     # 手动转换返回值，确保UUID被转换为字符串
-    return {
-        "id": str(dataset.id),
-        "user_id": str(dataset.user_id),
-        "name": dataset.name,
-        "description": dataset.description,
-        "is_public": dataset.is_public,
-        "tags": dataset.tags or [],
-        "dataset_metadata": dataset.dataset_metadata or {},
-        "question_count": question_count,
-        "created_at": dataset.created_at,
-        "updated_at": dataset.updated_at
-    }
+    return serialize_dataset(dataset, question_count=question_count, mask_user_id=False)
 
 @router.delete("/{dataset_id}")
 def delete_dataset_api(
@@ -584,15 +499,4 @@ def copy_dataset_api(
     ).scalar()
 
     # 返回响应
-    return {
-        "id": str(new_dataset.id),
-        "user_id": str(new_dataset.user_id),
-        "name": new_dataset.name,
-        "description": new_dataset.description,
-        "is_public": new_dataset.is_public,
-        "tags": new_dataset.tags or [],
-        "dataset_metadata": new_dataset.dataset_metadata or {},
-        "question_count": question_count,
-        "created_at": new_dataset.created_at,
-        "updated_at": new_dataset.updated_at
-    }
+    return serialize_dataset(new_dataset, question_count=question_count, mask_user_id=False)

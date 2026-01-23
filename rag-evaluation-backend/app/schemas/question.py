@@ -47,7 +47,7 @@ class QuestionOut(QuestionBase):
     dataset_id: str
     created_at: datetime
     updated_at: datetime
-    rag_answers: Optional[List[RagAnswerOut]] = []
+    rag_answers: Optional[List[RagAnswerOut]] = Field(default_factory=list)
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -70,7 +70,7 @@ class QuestionGenerateRequest(BaseModel):
 # 问题生成响应
 class QuestionGenerateResponse(BaseModel):
     generated_questions: List[Dict[str, Any]]
-    saved_questions: List[QuestionOut] = []
+    saved_questions: List[QuestionOut] = Field(default_factory=list)
     count: int
 
 # 新增的批量删除请求模式

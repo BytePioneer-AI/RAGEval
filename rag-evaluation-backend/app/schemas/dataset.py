@@ -8,8 +8,8 @@ class DatasetBase(BaseModel):
     name: str
     description: Optional[str] = None
     is_public: Optional[bool] = False
-    tags: Optional[List[str]] = []
-    dataset_metadata: Optional[Dict[str, Any]] = {}
+    tags: Optional[List[str]] = Field(default_factory=list)
+    dataset_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 # 创建数据集时的请求模型
 class DatasetCreate(DatasetBase):
@@ -35,7 +35,7 @@ class DatasetOut(DatasetBase):
 
 # 数据集详情响应模型
 class DatasetDetail(DatasetOut):
-    projects: List[Dict[str, str]] = []
+    projects: List[Dict[str, str]] = Field(default_factory=list)
     
     model_config = ConfigDict(from_attributes=True)
 

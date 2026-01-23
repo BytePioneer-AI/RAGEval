@@ -19,8 +19,8 @@ class ProjectBase(BaseModel):
     public: Optional[bool] = False
     scoring_scale: Optional[str] = "1-5"
     evaluation_method: Optional[str] = "auto"
-    settings: Optional[Dict[str, Any]] = {}
-    evaluation_dimensions: Optional[List[EvaluationDimension]] = []
+    settings: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    evaluation_dimensions: Optional[List[EvaluationDimension]] = Field(default_factory=list)
 
 # 创建项目时的请求模型
 class ProjectCreate(ProjectBase):
@@ -48,9 +48,9 @@ class ProjectOut(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
 class ProjectDetail(ProjectOut):
-    datasets: List[Dict[str, Any]] = []
-    accuracy_tests: List[Dict[str, Any]] = []
-    performance_tests: List[Dict[str, Any]] = []
+    datasets: List[Dict[str, Any]] = Field(default_factory=list)
+    accuracy_tests: List[Dict[str, Any]] = Field(default_factory=list)
+    performance_tests: List[Dict[str, Any]] = Field(default_factory=list)
 
 class ProjectWithDimensions(ProjectOut):
-    evaluation_dimensions: List[EvaluationDimension] = []
+    evaluation_dimensions: List[EvaluationDimension] = Field(default_factory=list)

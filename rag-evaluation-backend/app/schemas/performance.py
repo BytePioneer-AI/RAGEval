@@ -10,7 +10,7 @@ class PerformanceTestBase(BaseModel):
     description: Optional[str] = None
     concurrency: int = 1
     version: Optional[str] = None
-    config: Dict[str, Any] = {}
+    config: Dict[str, Any] = Field(default_factory=dict)
     rag_config: Optional[str] = None
 
 class PerformanceTestCreate(PerformanceTestBase):

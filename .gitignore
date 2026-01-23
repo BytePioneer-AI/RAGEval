@@ -52,3 +52,9 @@ docker_https/
 .cursorrules
 
 .cursor
+
+# 忽略所有子文件夹中的 openspec
+**/openspec/
+
+# log files
+*.log

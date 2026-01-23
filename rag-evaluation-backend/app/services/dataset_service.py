@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterable
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, desc
 from fastapi.encoders import jsonable_encoder
@@ -6,6 +6,102 @@ from fastapi.encoders import jsonable_encoder
 from app.models.dataset import Dataset, ProjectDataset
 from app.models.question import Question
 from app.schemas.dataset import DatasetCreate, DatasetUpdate
+
+def serialize_dataset(
+    dataset: Dataset,
+    *,
+    question_count: int = 0,
+    current_user_id: Optional[str] = None,
+    mask_user_id: bool = False,
+    include_is_owner: bool = False,
+) -> Dict[str, Any]:
+    owner_id = str(dataset.user_id)
+    is_owner = current_user_id is not None and str(current_user_id) == owner_id
+    user_id = owner_id
+    if mask_user_id and not is_owner:
+        user_id = None
+
+    result = {
+        "id": str(dataset.id),
+        "user_id": user_id,
+        "name": dataset.name,
+        "description": dataset.description,
+        "is_public": dataset.is_public,
+        "tags": dataset.tags or [],
+        "dataset_metadata": dataset.dataset_metadata or {},
+        "question_count": question_count,
+        "created_at": dataset.created_at,
+        "updated_at": dataset.updated_at,
+    }
+
+    if include_is_owner:
+        result["is_owner"] = is_owner
+
+    return result
+
+def build_dataset_query(
+    db: Session,
+    *,
+    user_id: str,
+    include_public: bool = True,
+    only_public: bool = False,
+    only_private: bool = False,
+    only_mine: bool = False,
+    tags: Optional[List[str]] = None,
+    search: Optional[str] = None,
+) -> Any:
+    query = db.query(Dataset)
+
+    if only_public:
+        query = query.filter(Dataset.is_public == True)
+    elif only_private:
+        query = query.filter(
+            Dataset.user_id == user_id,
+            Dataset.is_public == False,
+        )
+    elif only_mine:
+        query = query.filter(Dataset.user_id == user_id)
+    elif include_public:
+        query = query.filter(
+            or_(
+                Dataset.user_id == user_id,
+                Dataset.is_public == True,
+            )
+        )
+    else:
+        query = query.filter(Dataset.user_id == user_id)
+
+    if tags:
+        for tag in tags:
+            query = query.filter(Dataset.tags.contains([tag]))
+
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Dataset.name.ilike(search_term),
+                Dataset.description.ilike(search_term),
+            )
+        )
+
+    return query
+
+def get_question_counts_by_dataset_ids(
+    db: Session,
+    dataset_ids: Iterable[str],
+) -> Dict[str, int]:
+    dataset_ids = list(dataset_ids)
+    if not dataset_ids:
+        return {}
+
+    counts = (
+        db.query(Question.dataset_id, func.count(Question.id))
+        .filter(Question.dataset_id.in_(dataset_ids))
+        .group_by(Question.dataset_id)
+        .all()
+    )
+
+    return {str(dataset_id): count for dataset_id, count in counts}
 
 def create_dataset(db: Session, obj_in: DatasetCreate, user_id: str) -> Dataset:
     """创建数据集"""
@@ -47,52 +143,19 @@ def get_datasets_by_user(
         only_mine: 是否只返回当前用户的数据集
         tags: 标签列表，用于筛选
     """
-    # 基础查询
-    query = db.query(Dataset)
-    
-    # 用户和公开状态筛选
-    if only_public:
-        # 只返回公开数据集
-        query = query.filter(Dataset.is_public == True)
-    elif only_private:
-        # 只返回用户自己的私有数据集
-        query = query.filter(
-            Dataset.user_id == user_id,
-            Dataset.is_public == False
-        )
-    elif only_mine:
-        # 只返回用户自己的所有数据集
-        query = query.filter(Dataset.user_id == user_id)
-    elif include_public:
-        # 返回用户自己的数据集和其他用户的公开数据集
-        query = query.filter(
-            or_(
-                Dataset.user_id == user_id,
-                Dataset.is_public == True
-            )
-        )
-    else:
-        # 只返回用户自己的数据集
-        query = query.filter(Dataset.user_id == user_id)
-    
-    # 标签筛选
-    if tags:
-        for tag in tags:
-            query = query.filter(Dataset.tags.contains([tag]))
-    
-    # 关键词搜索
-    if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            or_(
-                Dataset.name.ilike(search_term),
-                Dataset.description.ilike(search_term)
-            )
-        )
-    
-    # 先展示用户自己的数据集，再展示其他公开数据集
+    query = build_dataset_query(
+        db,
+        user_id=user_id,
+        include_public=include_public,
+        only_public=only_public,
+        only_private=only_private,
+        only_mine=only_mine,
+        tags=tags,
+        search=search,
+    )
+
     query = query.order_by(Dataset.user_id == user_id, desc(Dataset.created_at))
-    
+
     return query.offset(skip).limit(limit).all()
 
 def get_public_datasets(
@@ -153,20 +216,19 @@ def get_dataset_with_stats(db: Session, dataset_id: str) -> Dict[str, Any]:
         Question.dataset_id == dataset_id
     ).scalar()
     
-    # 获取使用此数据集的项目
-    projects = db.query(ProjectDataset).filter(
-        ProjectDataset.dataset_id == dataset_id
-    ).all()
-    
-    project_info = []
-    for p in projects:
-        from app.models.project import Project
-        project = db.query(Project).filter(Project.id == p.project_id).first()
-        if project:
-            project_info.append({
-                "id": str(project.id),
-                "name": project.name
-            })
+    from app.models.project import Project
+
+    projects = (
+        db.query(Project.id, Project.name)
+        .join(ProjectDataset, ProjectDataset.project_id == Project.id)
+        .filter(ProjectDataset.dataset_id == dataset_id)
+        .all()
+    )
+
+    project_info = [
+        {"id": str(project_id), "name": project_name}
+        for project_id, project_name in projects
+    ]
     
     result = {
         "dataset": dataset,
@@ -320,93 +382,64 @@ def get_datasets_with_question_count(
     """获取数据集列表并统计每个数据集的问题数量"""
     from app.models.question import Question
     from sqlalchemy import func, desc, or_
-    
-    # 基础数据集查询
+
     dataset_query = db.query(Dataset)
-    
-    # 应用过滤条件
+
     if user_id is not None:
         dataset_query = dataset_query.filter(
             or_(Dataset.user_id == user_id, Dataset.is_public == True)
         )
-    
+
     if is_public is not None:
         dataset_query = dataset_query.filter(Dataset.is_public == is_public)
-    
+
     if tags:
         for tag in tags:
             dataset_query = dataset_query.filter(Dataset.tags.contains([tag]))
-    
+
     if search:
         search_term = f"%{search}%"
         dataset_query = dataset_query.filter(
             or_(
                 Dataset.name.ilike(search_term),
-                Dataset.description.ilike(search_term)
+                Dataset.description.ilike(search_term),
             )
         )
-    
-    # 排序
+
     if user_id:
         dataset_query = dataset_query.order_by(Dataset.user_id == user_id, desc(Dataset.created_at))
     else:
         dataset_query = dataset_query.order_by(desc(Dataset.created_at))
-    
-    # 先获取分页后的数据集
-    datasets = dataset_query.offset(skip).limit(limit).all()
-    
-    # 为这些数据集获取问题数量
-    result = []
-    for dataset in datasets:
-        question_count = db.query(func.count(Question.id)).filter(
-            Question.dataset_id == str(dataset.id)
-        ).scalar()
-        
-        # 组合数据集和问题计数
-        dataset_dict = {
-            "dataset": dataset,
-            "question_count": question_count
-        }
-        result.append(dataset_dict)
-    
-    return result
+
+    datasets = dataset_query.offset(skip).limit(limit).subquery()
+
+    counts_subq = (
+        db.query(
+            Question.dataset_id.label("dataset_id"),
+            func.count(Question.id).label("question_count"),
+        )
+        .group_by(Question.dataset_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(Dataset, counts_subq.c.question_count)
+        .join(datasets, Dataset.id == datasets.c.id)
+        .outerjoin(counts_subq, Dataset.id == counts_subq.c.dataset_id)
+        .all()
+    )
+
+    return [
+        {"dataset": dataset, "question_count": count or 0}
+        for dataset, count in rows
+    ]
 
 def get_project_datasets_with_question_count(
     db: Session,
     project_id: str
 ) -> List[Dict[str, Any]]:
     """获取项目关联的所有数据集，并统计每个数据集的问题数量"""
-    from app.models.question import Question
-    from sqlalchemy import func
-    
-    # 获取项目关联的数据集ID
-    dataset_ids = db.query(ProjectDataset.dataset_id).filter(
-        ProjectDataset.project_id == project_id
-    ).all()
-    
-    if not dataset_ids:
-        return []
-        
-    dataset_ids = [d[0] for d in dataset_ids]
-    
-    # 获取这些数据集的基本信息
-    datasets = db.query(Dataset).filter(
-        Dataset.id.in_(dataset_ids)
-    ).all()
-    
-    # 为每个数据集获取问题数量
-    result = []
-    for dataset in datasets:
-        question_count = db.query(func.count(Question.id)).filter(
-            Question.dataset_id == str(dataset.id)
-        ).scalar()
-        
-        result.append({
-            "dataset": dataset,
-            "question_count": question_count
-        })
-    
-    return result
+    return get_project_datasets_with_question_count_efficient(db, project_id)
 
 def get_project_datasets_with_question_count_efficient(
     db: Session,
