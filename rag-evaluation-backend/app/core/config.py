@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     
     # Anthropic API 配置
     ANTHROPIC_API_KEY: Optional[str] = None
+
+    # API Key 加密主密钥（Base64 或 32 字节 hex）
+    API_KEY_MASTER_KEY: Optional[str] = None
     
     # 测试用户
     FIRST_ADMIN_EMAIL: EmailStr = "admin@example.com"

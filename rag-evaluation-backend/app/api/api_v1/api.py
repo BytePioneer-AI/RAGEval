@@ -2,7 +2,8 @@ from fastapi import APIRouter
 
 from app.api.api_v1.endpoints import (
     auth, users, datasets, projects, questions,
-    rag_answers, dataset_questions, performance, accuracy, admin, rag_proxy
+    rag_answers, dataset_questions, performance, accuracy, admin, rag_proxy,
+    model_configs, user_model_configs
 )
 
 api_router = APIRouter()
@@ -17,6 +18,8 @@ api_router.include_router(dataset_questions.router, prefix="/datasets-questions"
 api_router.include_router(accuracy.router, prefix="/accuracy", tags=["accuracy"])
 api_router.include_router(admin.router, prefix="/admin", tags=["管理员"])
 api_router.include_router(rag_proxy.router, prefix="/rag", tags=["RAG代理"])
+api_router.include_router(model_configs.router, prefix="/model-configs", tags=["模型配置"])
+api_router.include_router(user_model_configs.router, prefix="/user-model-configs", tags=["用户模型配置"])
 
 @api_router.get("/health")
 def health_check():

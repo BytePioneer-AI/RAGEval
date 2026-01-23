@@ -41,6 +41,62 @@
 
 ---
 
+## 🟢 2.1 模型配置表 (`model_configs`)
+
+**业务含义**：存储可复用的模型配置元数据，用于多厂商路由与默认参数管理。
+
+| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
+| :----- | :--- | :--- | :----- | :------------- |
+| `id` | UUID | YES | uuid4 | 主键 |
+| `name` | VARCHAR(100) | YES | - | 配置名称 |
+| `provider` | VARCHAR(50) | YES | - | 厂商/协议类型 |
+| `model` | VARCHAR(100) | YES | - | 模型名称 |
+| `api_base` | VARCHAR(255) | NO | NULL | 自定义 API 地址 |
+| `default_params` | JSONB | NO | NULL | 模型默认参数 |
+| `is_public` | BOOLEAN | NO | FALSE | 是否公开 |
+| `created_by` | UUID | NO | NULL | 创建者（外键 → users.id） |
+| `scene` | VARCHAR(255) | NO | NULL | 用户自定义场景备注 |
+| `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
+
+---
+
+## 🟢 2.2 用户模型密钥绑定表 (`user_model_configs`)
+
+**业务含义**：用户与模型配置的多对多绑定，保存加密后的 API Key 与状态信息。
+
+| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
+| :----- | :--- | :--- | :----- | :------------- |
+| `id` | UUID | YES | uuid4 | 主键 |
+| `user_id` | UUID | YES | - | 外键 → users.id |
+| `model_config_id` | UUID | YES | - | 外键 → model_configs.id |
+| `alias` | VARCHAR(100) | NO | NULL | 用户别名 |
+| `key_encrypted` | TEXT | YES | - | 加密后的密钥 |
+| `key_last4` | VARCHAR(4) | YES | - | 密钥末 4 位 |
+| `key_hash` | VARCHAR(64) | NO | NULL | 密钥哈希（去重/检测） |
+| `is_active` | BOOLEAN | NO | TRUE | 是否启用 |
+| `rotated_at` | TIMESTAMPTZ | NO | NULL | 轮换时间 |
+| `revoked_at` | TIMESTAMPTZ | NO | NULL | 撤销时间 |
+| `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
+
+---
+
+## 🟢 2.3 API Key 使用审计表 (`api_key_audits`)
+
+**业务含义**：记录 API Key 的使用审计信息。
+
+| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
+| :----- | :--- | :--- | :----- | :------------- |
+| `id` | UUID | YES | uuid4 | 主键 |
+| `user_id` | UUID | YES | - | 外键 → users.id |
+| `model_config_id` | UUID | NO | NULL | 外键 → model_configs.id |
+| `user_model_config_id` | UUID | NO | NULL | 外键 → user_model_configs.id |
+| `key_last4` | VARCHAR(4) | NO | NULL | 密钥末 4 位 |
+| `created_at` | TIMESTAMPTZ | NO | NOW() | 使用时间 |
+
+---
+
 ## 🟢 3. 项目表 (`projects`)
 
 **业务含义**：RAG 评测项目，是评测任务的顶层组织单元。
@@ -326,6 +382,12 @@
 ```mermaid
 erDiagram
     users ||--o{ api_keys : "拥有"
+    users ||--o{ model_configs : "创建"
+    users ||--o{ user_model_configs : "拥有"
+    users ||--o{ api_key_audits : "使用"
+    model_configs ||--o{ user_model_configs : "绑定"
+    model_configs ||--o{ api_key_audits : "引用"
+    user_model_configs ||--o{ api_key_audits : "使用"
     users ||--o{ projects : "创建"
     users ||--o{ datasets : "创建"
     users ||--o{ reports : "创建"
@@ -370,6 +432,35 @@ erDiagram
         VARCHAR key UK
         VARCHAR provider
         BOOLEAN is_active
+    }
+
+    model_configs {
+        UUID id PK
+        VARCHAR name
+        VARCHAR provider
+        VARCHAR model
+        VARCHAR api_base
+        JSONB default_params
+        BOOLEAN is_public
+        VARCHAR scene
+    }
+
+    user_model_configs {
+        UUID id PK
+        UUID user_id FK
+        UUID model_config_id FK
+        VARCHAR alias
+        TEXT key_encrypted
+        VARCHAR key_last4
+        BOOLEAN is_active
+    }
+
+    api_key_audits {
+        UUID id PK
+        UUID user_id FK
+        UUID model_config_id FK
+        UUID user_model_config_id FK
+        VARCHAR key_last4
     }
     
     projects {
@@ -585,6 +676,12 @@ sequenceDiagram
 | 子表 | 外键字段 | 父表 | 删除行为 |
 | :--- | :------- | :--- | :------- |
 | `api_keys` | `user_id` | `users` | CASCADE |
+| `model_configs` | `created_by` | `users` | SET NULL |
+| `user_model_configs` | `user_id` | `users` | CASCADE |
+| `user_model_configs` | `model_config_id` | `model_configs` | CASCADE |
+| `api_key_audits` | `user_id` | `users` | CASCADE |
+| `api_key_audits` | `model_config_id` | `model_configs` | SET NULL |
+| `api_key_audits` | `user_model_config_id` | `user_model_configs` | SET NULL |
 | `projects` | `user_id` | `users` | CASCADE |
 | `datasets` | `user_id` | `users` | CASCADE |
 | `evaluation_dimensions` | `project_id` | `projects` | CASCADE |
