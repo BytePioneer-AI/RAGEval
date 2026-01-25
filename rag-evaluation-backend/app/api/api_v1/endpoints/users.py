@@ -1,23 +1,25 @@
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
 from pydantic import EmailStr
 import uuid
 
 from app.api.deps import get_current_active_admin, get_current_user, get_db, get_current_active_user
-from app.core.security import get_password_hash, verify_password
 from app.models.user import User
-from app.models.api_key import ApiKey
 from app.schemas.user import UserCreate, UserUpdate, UserOut, ApiKeyCreate, ApiKeyUpdate, ApiKeyOut
 from app.services.user_service import (
-    get_user, 
-    get_users, 
-    create_user, 
-    update_user, 
-    delete_user
+    get_user as service_get_user,
+    get_user_by_email as service_get_user_by_email,
+    get_users as service_get_users,
+    create_user as service_create_user,
+    update_user as service_update_user,
+    delete_user as service_delete_user,
+    get_api_key as service_get_api_key,
+    get_user_api_keys as service_get_user_api_keys,
+    create_api_key as service_create_api_key,
+    update_api_key as service_update_api_key,
+    delete_api_key as service_delete_api_key,
 )
 from app.utils.security import generate_api_key_token
 
@@ -33,7 +35,7 @@ def read_users(
     """
     获取所有用户
     """
-    users = get_users(db, skip=skip, limit=limit)
+    users = service_get_users(db, skip=skip, limit=limit)
     return users
 
 @router.post("", response_model=UserOut)
@@ -46,13 +48,13 @@ def create_user_admin(
     """
     创建新用户 (仅管理员)
     """
-    user = get_user_by_email(db, email=user_in.email)
+    user = service_get_user_by_email(db, email=user_in.email)
     if user:
         raise HTTPException(
             status_code=400,
             detail="该邮箱已被注册",
         )
-    user = create_user(db, obj_in=user_in)
+    user = service_create_user(db, obj_in=user_in)
     return user
 
 @router.get("/me", response_model=UserOut)
@@ -97,19 +99,7 @@ def update_current_user_info(
     if avatar_url is not None:
         current_user_data.avatar_url = avatar_url
     
-    # 更新用户数据
-    for field, value in current_user_data.dict(exclude_unset=True).items():
-        if field == "password":
-            setattr(current_user, "password_hash", get_password_hash(value))
-        else:
-            setattr(current_user, field, value)
-    
-    current_user.updated_at = func.now()  # 更新时间戳
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    
-    return current_user
+    return service_update_user(db, current_user, current_user_data)
 
 @router.get("/{user_id}", response_model=UserOut)
 def get_user_by_id(
@@ -129,7 +119,7 @@ def get_user_by_id(
             detail="无权限查看此用户信息"
         )
     
-    user = db.query(User).filter(User.id == user_id).first()
+    user = service_get_user(db, user_id)
     if not user:
         raise HTTPException(
             status_code=404,
@@ -150,27 +140,14 @@ def update_user_by_id(
     更新指定用户信息
     仅管理员可操作
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    user = service_get_user(db, user_id)
     if not user:
         raise HTTPException(
             status_code=404,
             detail="用户未找到"
         )
     
-    # 更新用户数据
-    update_data = user_in.dict(exclude_unset=True)
-    if "password" in update_data:
-        update_data["password_hash"] = get_password_hash(update_data.pop("password"))
-    
-    for field, value in update_data.items():
-        setattr(user, field, value)
-    
-    user.updated_at = func.now()  # 更新时间戳
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    
-    return user
+    return service_update_user(db, user, user_in)
 
 @router.delete("/{user_id}", response_model=UserOut)
 def delete_user(
@@ -183,7 +160,7 @@ def delete_user(
     删除指定用户
     仅管理员可操作
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    user = service_get_user(db, user_id)
     if not user:
         raise HTTPException(
             status_code=404,
@@ -201,8 +178,7 @@ def delete_user(
     user_out = UserOut.from_orm(user)
     
     # 删除用户
-    db.delete(user)
-    db.commit()
+    service_delete_user(db, user_id)
     
     return user_out
 
@@ -217,19 +193,7 @@ def create_api_key(
     """
     创建API密钥
     """
-    db_obj = ApiKey(
-        user_id=current_user.id,
-        name=api_key_in.name,
-        key=api_key_in.key,
-        provider=api_key_in.provider,
-        is_active=api_key_in.is_active if api_key_in.is_active is not None else True
-    )
-    
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    
-    return db_obj
+    return service_create_api_key(db, user_id=current_user.id, obj_in=api_key_in)
 
 @router.get("/api-keys", response_model=List[ApiKeyOut])
 def get_api_keys(
@@ -240,8 +204,7 @@ def get_api_keys(
     """
     获取当前用户的所有API密钥
     """
-    api_keys = db.query(ApiKey).filter(ApiKey.user_id == current_user.id).all()
-    return api_keys
+    return service_get_user_api_keys(db, user_id=current_user.id)
 
 @router.put("/api-keys/{api_key_id}", response_model=ApiKeyOut)
 def update_api_key(
@@ -254,28 +217,15 @@ def update_api_key(
     """
     更新API密钥
     """
-    api_key = db.query(ApiKey).filter(
-        ApiKey.id == api_key_id, 
-        ApiKey.user_id == current_user.id
-    ).first()
+    api_key = service_get_api_key(db, api_key_id)
     
-    if not api_key:
+    if not api_key or str(api_key.user_id) != str(current_user.id):
         raise HTTPException(
             status_code=404,
             detail="API密钥未找到或无权访问"
         )
     
-    # 更新API密钥数据
-    update_data = api_key_in.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(api_key, field, value)
-    
-    api_key.updated_at = func.now()  # 更新时间戳
-    db.add(api_key)
-    db.commit()
-    db.refresh(api_key)
-    
-    return api_key
+    return service_update_api_key(db, api_key, api_key_in)
 
 @router.delete("/api-keys/{api_key_id}")
 def delete_api_key(
@@ -287,18 +237,14 @@ def delete_api_key(
     """
     删除API密钥
     """
-    api_key = db.query(ApiKey).filter(
-        ApiKey.id == api_key_id, 
-        ApiKey.user_id == current_user.id
-    ).first()
+    api_key = service_get_api_key(db, api_key_id)
     
-    if not api_key:
+    if not api_key or str(api_key.user_id) != str(current_user.id):
         raise HTTPException(
             status_code=404,
             detail="API密钥未找到或无权访问"
         )
     
-    db.delete(api_key)
-    db.commit()
+    service_delete_api_key(db, api_key_id)
     
     return {"detail": "API密钥已删除"} 

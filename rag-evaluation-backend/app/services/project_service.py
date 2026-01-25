@@ -10,6 +10,8 @@ from app.schemas.project import (
     ProjectWithDimensions,
     ProjectDetail
 )
+from app.crud import project as crud_project
+from app.crud import user as crud_user
 
 def create_project(db: Session, obj_in: ProjectCreate, user_id: str) -> Project:
     """创建项目"""
@@ -24,15 +26,11 @@ def create_project(db: Session, obj_in: ProjectCreate, user_id: str) -> Project:
             {"name": "conciseness", "weight": 1.0, "description": "评估回答是否简洁无冗余", "enabled": False}
         ]
 
-    db_obj = Project(**obj_in_data, user_id=user_id)
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    return crud_project.create_project(db, data=obj_in_data, user_id=user_id)
 
 def get_project(db: Session, project_id: str) -> Optional[Project]:
     """通过ID获取项目"""
-    return db.query(Project).filter(Project.id == project_id).first()
+    return crud_project.get_project(db, project_id)
 
 def get_project_with_dimensions(db: Session, project_id: str, user_id: str) -> Optional[ProjectWithDimensions]:
     """获取项目详情，包括评测维度"""
@@ -43,14 +41,12 @@ def get_project_with_dimensions(db: Session, project_id: str, user_id: str) -> O
     # 检查权限
     if str(project.user_id) != user_id:
         # 检查管理员权限
-        from app.models.user import User
-        user = db.query(User).filter(User.id == user_id).first()
+        user = crud_user.get_user(db, user_id)
         if not (user and user.is_admin):
             return None
 
     # 获取项目关联的维度
-    from app.models.project import EvaluationDimension
-    dimensions = db.query(EvaluationDimension).filter(EvaluationDimension.project_id == project_id).all()
+    dimensions = crud_project.list_evaluation_dimensions(db, project_id)
 
     # 转换为响应模型
     from app.schemas.project import ProjectWithDimensions
@@ -91,15 +87,14 @@ def get_projects_by_user(
     search: Optional[str] = None
 ) -> List[Project]:
     """获取用户的所有项目"""
-    query = db.query(Project).filter(Project.user_id == user_id)
-
-    if status:
-        query = query.filter(Project.status == status)
-
-    if search:
-        query = query.filter(Project.name.ilike(f"%{search}%"))
-
-    return query.offset(skip).limit(limit).all()
+    return crud_project.list_projects_by_user(
+        db,
+        user_id=user_id,
+        skip=skip,
+        limit=limit,
+        status=status,
+        search=search,
+    )
 
 def update_project(
     db: Session,
@@ -121,10 +116,7 @@ def update_project(
         if field in update_data:
             setattr(db_obj, field, update_data[field])
 
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    return crud_project.update_project(db, db_obj, update_data)
 
 def delete_project(db: Session, project_id: str) -> bool:
     """删除项目"""
@@ -132,8 +124,7 @@ def delete_project(db: Session, project_id: str) -> bool:
     if not db_obj:
         return False
 
-    db.delete(db_obj)
-    db.commit()
+    crud_project.delete_project(db, db_obj)
     return True
 
 def update_project_status(db: Session, project_id: str, status: str) -> Optional[Project]:
@@ -142,11 +133,7 @@ def update_project_status(db: Session, project_id: str, status: str) -> Optional
     if not db_obj:
         return None
 
-    db_obj.status = status
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    return crud_project.update_project(db, db_obj, {"status": status})
 
 def update_project_dimensions(
     db: Session,
@@ -158,11 +145,7 @@ def update_project_dimensions(
     if not db_obj:
         return None
 
-    db_obj.evaluation_dimensions = dimensions
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    return crud_project.update_project(db, db_obj, {"evaluation_dimensions": dimensions})
 
 def get_project_with_stats(db: Session, project_id: str) -> Dict[str, Any]:
     """获取项目详情及统计信息，包括关联的数据集、精度测试和性能测试"""
@@ -198,7 +181,7 @@ def get_project_with_stats(db: Session, project_id: str) -> Dict[str, Any]:
         datasets_info.append(dataset_dict)
 
     # 获取精度测试信息
-    accuracy_tests = db.query(AccuracyTest).filter(AccuracyTest.project_id == project_id).all()
+    accuracy_tests = crud_project.list_accuracy_tests_by_project(db, project_id)
     accuracy_tests_info = []
     for test in accuracy_tests:
         accuracy_tests_info.append({
@@ -209,7 +192,7 @@ def get_project_with_stats(db: Session, project_id: str) -> Dict[str, Any]:
         })
 
     # 获取性能测试信息
-    performance_tests = db.query(PerformanceTest).filter(PerformanceTest.project_id == project_id).all()
+    performance_tests = crud_project.list_performance_tests_by_project(db, project_id)
     performance_tests_info = []
     for test in performance_tests:
         performance_tests_info.append({

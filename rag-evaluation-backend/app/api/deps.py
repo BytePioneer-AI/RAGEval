@@ -8,6 +8,7 @@ from app.core.security import ALGORITHM
 from app.db.base import get_db
 from app.models.user import User
 from app.schemas.user import TokenPayload
+from app.services.user_service import get_user as get_user_service
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
@@ -30,7 +31,7 @@ def get_current_user(
             detail="认证凭据无效",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    user = db.query(User).filter(User.id == token_data.sub).first()
+    user = get_user_service(db, token_data.sub)
 
     if not user:
         raise HTTPException(status_code=404, detail="用户未找到")

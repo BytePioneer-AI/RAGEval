@@ -3,151 +3,129 @@ from datetime import datetime
 import numpy as np
 from sqlalchemy.orm import Session
 
+from app.crud import performance as crud_performance
 from app.models.performance import PerformanceTest
 from app.models.question import Question
 from app.models.rag_answer import RagAnswer
 from app.schemas.performance import PerformanceTestCreate, PerformanceTestUpdate
 from app.services import question_service
 
+
 class PerformanceService:
     def get(self, db: Session, *, id: str) -> Optional[PerformanceTest]:
-        """根据ID获取性能测试"""
-        return db.query(PerformanceTest).filter(PerformanceTest.id == id).first()
-    
-    def get_multi(self, db: Session, *, skip: int = 0, limit: int = 100) -> List[PerformanceTest]:
-        """获取多个性能测试"""
-        return db.query(PerformanceTest).offset(skip).limit(limit).all()
-    
-    def get_by_project(self, db: Session, *, project_id: str) -> List[PerformanceTest]:
-        """获取项目的所有性能测试"""
-        # 时间倒序排列    db.query(PerformanceTest).filter(PerformanceTest.project_id == project_id).all()
-        return  db.query(PerformanceTest).filter(PerformanceTest.project_id == project_id).order_by(PerformanceTest.created_at.desc()).all()
-    
-    def update(self, db: Session, *, db_obj: PerformanceTest, obj_in: PerformanceTestUpdate) -> PerformanceTest:
-        """更新性能测试"""
-        update_data = obj_in.dict(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
+        return crud_performance.get_performance_test(db, id)
 
-    def create_performance_test(
-        self, db: Session, *, obj_in: PerformanceTestCreate
-    ) -> PerformanceTest:
-        # 如果提供了dataset_id，获取问题总数
+    def get_multi(self, db: Session, *, skip: int = 0, limit: int = 100) -> List[PerformanceTest]:
+        return crud_performance.list_performance_tests(db, skip=skip, limit=limit)
+
+    def get_by_project(self, db: Session, *, project_id: str) -> List[PerformanceTest]:
+        return crud_performance.list_performance_tests_by_project(db, project_id)
+
+    def update(self, db: Session, *, db_obj: PerformanceTest, obj_in: PerformanceTestUpdate) -> PerformanceTest:
+        update_data = obj_in.dict(exclude_unset=True)
+        return crud_performance.update_performance_test(db, db_obj=db_obj, update_data=update_data)
+
+    def create_performance_test(self, db: Session, *, obj_in: PerformanceTestCreate) -> PerformanceTest:
         total_questions = 0
         if obj_in.dataset_id:
-            questions = question_service.get_questions_by_dataset(
-                db=db, dataset_id=obj_in.dataset_id
-            )
+            questions = question_service.get_questions_by_dataset(db=db, dataset_id=obj_in.dataset_id)
             total_questions = len(questions)
-        
-        # 创建性能测试记录
-        db_obj = PerformanceTest(
-            name=obj_in.name,
-            project_id=obj_in.project_id,
-            dataset_id=obj_in.dataset_id,
-            description=obj_in.description,
-            concurrency=obj_in.concurrency,
-            version=obj_in.version,
-            config=obj_in.config,
-            rag_config=obj_in.rag_config,
-            total_questions=total_questions,
-            status="created"
-        )
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-    
-    def start_performance_test(
-        self, db: Session, *, performance_test_id: str
-    ) -> PerformanceTest:
-        """更新测试状态为运行中"""
-        db_obj = db.query(PerformanceTest).filter(PerformanceTest.id == performance_test_id).first()
+
+        data = {
+            "name": obj_in.name,
+            "project_id": obj_in.project_id,
+            "dataset_id": obj_in.dataset_id,
+            "description": obj_in.description,
+            "concurrency": obj_in.concurrency,
+            "version": obj_in.version,
+            "config": obj_in.config,
+            "rag_config": obj_in.rag_config,
+            "total_questions": total_questions,
+            "status": "created",
+        }
+        return crud_performance.create_performance_test(db, data=data)
+
+    def start_performance_test(self, db: Session, *, performance_test_id: str) -> PerformanceTest:
+        db_obj = crud_performance.get_performance_test(db, performance_test_id)
         if not db_obj:
             return None
-        
-        db_obj.status = "running"
-        db_obj.started_at = datetime.utcnow()
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-    
+
+        update_data = {
+            "status": "running",
+            "started_at": datetime.utcnow(),
+        }
+        return crud_performance.update_performance_test(db, db_obj=db_obj, update_data=update_data)
+
     def complete_performance_test(
-        self, db: Session, *, performance_test_id: str, calculate_metrics: bool = True
+        self,
+        db: Session,
+        *,
+        performance_test_id: str,
+        calculate_metrics: bool = True,
     ) -> PerformanceTest:
-        """完成性能测试并计算汇总指标"""
-        db_obj = db.query(PerformanceTest).filter(PerformanceTest.id == performance_test_id).first()
+        db_obj = crud_performance.get_performance_test(db, performance_test_id)
         if not db_obj:
             return None
-        
-        db_obj.status = "completed"
-        db_obj.completed_at = datetime.utcnow()
-        
+
+        update_data = {
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+        }
+
         if calculate_metrics:
-            # 获取该测试的所有RAG答案
-            rag_answers = db.query(RagAnswer).filter(
-                RagAnswer.performance_test_id == performance_test_id
-            ).all()
-            
-            # 计算汇总指标
+            rag_answers = crud_performance.list_rag_answers_by_test(db, performance_test_id)
             metrics = self._calculate_summary_metrics(rag_answers, db_obj)
-            db_obj.summary_metrics = metrics
-            
-            # 更新成功和失败的问题数
-            db_obj.success_questions = len([a for a in rag_answers if a.total_response_time is not None])
-            db_obj.failed_questions = len(rag_answers) - db_obj.success_questions
-            db_obj.processed_questions = len(rag_answers)
-        
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-    
+            success_questions = len([a for a in rag_answers if a.total_response_time is not None])
+            failed_questions = len(rag_answers) - success_questions
+
+            update_data.update({
+                "summary_metrics": metrics,
+                "success_questions": success_questions,
+                "failed_questions": failed_questions,
+                "processed_questions": len(rag_answers),
+            })
+
+        return crud_performance.update_performance_test(db, db_obj=db_obj, update_data=update_data)
+
     def fail_performance_test(
-        self, db: Session, *, performance_test_id: str, error_details: Dict[str, Any] = None
+        self,
+        db: Session,
+        *,
+        performance_test_id: str,
+        error_details: Dict[str, Any] = None,
     ) -> PerformanceTest:
-        """标记性能测试为失败状态"""
-        db_obj = db.query(PerformanceTest).filter(PerformanceTest.id == performance_test_id).first()
+        db_obj = crud_performance.get_performance_test(db, performance_test_id)
         if not db_obj:
             return None
-        
-        db_obj.status = "failed"
-        db_obj.completed_at = datetime.utcnow()
+
+        update_data = {
+            "status": "failed",
+            "completed_at": datetime.utcnow(),
+        }
         if error_details:
-            db_obj.summary_metrics = {"error_details": error_details}
-        
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-    
+            update_data["summary_metrics"] = {"error_details": error_details}
+
+        return crud_performance.update_performance_test(db, db_obj=db_obj, update_data=update_data)
+
     def _calculate_summary_metrics(self, rag_answers: List[RagAnswer], test: PerformanceTest) -> Dict[str, Any]:
-        """计算性能指标汇总"""
         if not rag_answers:
             return {}
-        
-        # 过滤出成功的回答
+
         successful_answers = [a for a in rag_answers if a.total_response_time is not None]
         if not successful_answers:
             return {"success_rate": 0, "test_duration_seconds": 0}
-        
-        # 计算测试持续时间
+
         if test.completed_at and test.started_at:
-            # 移除两个时间戳的时区信息，简化计算
             naive_completed = test.completed_at.replace(tzinfo=None)
             naive_started = test.started_at.replace(tzinfo=None)
             test_duration = (naive_completed - naive_started).total_seconds()
         else:
             test_duration = 0
-        
-        # 提取性能数据
+
         first_response_times = [a.first_response_time for a in successful_answers if a.first_response_time is not None]
         total_response_times = [a.total_response_time for a in successful_answers if a.total_response_time is not None]
         character_counts = [a.character_count for a in successful_answers if a.character_count is not None]
-        
-        # 计算分位数函数
+
         def calculate_percentiles(data):
             if not data:
                 return None
@@ -160,141 +138,77 @@ class PerformanceService:
                 "p90": float(np.percentile(data, 90)),
                 "p95": float(np.percentile(data, 95)),
                 "p99": float(np.percentile(data, 99)),
-                "samples": len(data)
+                "samples": len(data),
             }
-        
-        # 构建汇总指标
-        metrics = {
+
+        return {
             "response_time": {
                 "first_token_time": calculate_percentiles(first_response_times),
-                "total_time": calculate_percentiles(total_response_times)
+                "total_time": calculate_percentiles(total_response_times),
             },
             "throughput": {
                 "requests_per_second": len(successful_answers) / test_duration if test_duration > 0 else 0,
-                "chars_per_second": sum(character_counts) / test_duration if test_duration > 0 else 0
+                "chars_per_second": sum(character_counts) / test_duration if test_duration > 0 else 0,
             },
             "character_stats": {
-                "output_chars": calculate_percentiles(character_counts)
+                "output_chars": calculate_percentiles(character_counts),
             },
             "success_rate": len(successful_answers) / len(rag_answers) if rag_answers else 0,
-            "test_duration_seconds": test_duration
+            "test_duration_seconds": test_duration,
         }
-        
-        return metrics
-    
-    def get_performance_test_detail(
-        self, db: Session, *, performance_test_id: str
-    ) -> Dict[str, Any]:
-        """获取性能测试详情，包括测试结果"""
-        test = db.query(PerformanceTest).filter(PerformanceTest.id == performance_test_id).first()
+
+    def get_performance_test_detail(self, db: Session, *, performance_test_id: str) -> Dict[str, Any]:
+        test = crud_performance.get_performance_test(db, performance_test_id)
         if not test:
             return None
-        
-        # 获取这个测试生成的所有RAG答案
-        rag_answers = db.query(RagAnswer).filter(
-            RagAnswer.performance_test_id == performance_test_id
-        ).order_by(RagAnswer.sequence_number).all()
-        
-        # 构建详细结果
+
+        rag_answers = crud_performance.list_rag_answers_by_test_ordered(db, performance_test_id)
+
         return {
             "test": test,
             "rag_answers": rag_answers,
-            "total_answers": len(rag_answers)
+            "total_answers": len(rag_answers),
         }
 
     def get_qa_pairs(self, db: Session, *, performance_test_id: str, skip: int = 0, limit: int = 50) -> Dict[str, Any]:
-        """获取性能测试的问答对列表，返回标准分页格式"""
-        # 使用JOIN查询同时获取问题和回答
-        query_base = (
-            db.query(
-                RagAnswer.id,
-                RagAnswer.question_id,
-                RagAnswer.answer,
-                RagAnswer.total_response_time,
-                RagAnswer.first_response_time,
-                RagAnswer.sequence_number,
-                Question.question_text.label("question_content")
-            )
-            .join(Question, RagAnswer.question_id == Question.id)
-            .filter(RagAnswer.performance_test_id == performance_test_id)
-            .order_by(RagAnswer.sequence_number)
-        )
-        
-        # 计算总数
-        total = query_base.count()
-        
-        # 获取当前页数据
-        results = query_base.offset(skip).limit(limit).all()
-        
-        # 将查询结果转换为字典列表
-        items = []
-        for i, row in enumerate(results):
-            items.append({
-                "id": row.id,
-                "question_id": row.question_id,
-                "question_content": row.question_content,
-                "answer": row.answer,
-                "total_response_time": row.total_response_time,
-                "first_response_time": row.first_response_time,
-                "sequence_number": row.sequence_number if row.sequence_number is not None else i + 1 + skip
-            })
-        
-        # 计算页码相关信息
-        page = skip // limit + 1 if limit > 0 else 1
-        pages = (total + limit - 1) // limit if total > 0 else 1
-        
-        # 返回标准分页格式
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "size": limit,
-            "pages": pages
-        }
-
-    # def get_performance_tests_by_project(self, db: Session, *, project_id: str) -> List[PerformanceTest]:
-    #     """获取项目的所有性能测试记录"""
-    #     return self.get_by_project(db=db, project_id=project_id)
+        return crud_performance.get_qa_pairs(db, performance_test_id=performance_test_id, skip=skip, limit=limit)
 
     def check_running_tests(self, project_id: str, db: Session) -> List[PerformanceTest]:
-        """检查项目中的运行中测试"""
-        return db.query(PerformanceTest).filter(
-            PerformanceTest.project_id == project_id,
-            PerformanceTest.status == "running"
-        ).all()
+        tests = crud_performance.list_performance_tests_by_project(db, project_id)
+        return [test for test in tests if test.status == "running"]
 
     def mark_test_interrupted(self, db: Session, test_id: str, reason: str = None) -> Optional[PerformanceTest]:
-        """标记测试为中断状态"""
-        test = self.get(db, id=test_id)
+        test = crud_performance.get_performance_test(db, test_id)
         if not test:
             return None
-        
+
         if test.status == "running":
-            test.status = "interrupted"
-            test.completed_at = datetime.utcnow()
-            db.commit()
-            db.refresh(test)
-        
+            update_data = {
+                "status": "interrupted",
+                "completed_at": datetime.utcnow(),
+            }
+            return crud_performance.update_performance_test(db, db_obj=test, update_data=update_data)
+
         return test
 
     def reset_test(self, db: Session, test_id: str) -> Optional[PerformanceTest]:
-        """重置测试状态"""
-        test = self.get(db, id=test_id)
+        test = crud_performance.get_performance_test(db, test_id)
         if not test:
             return None
-        
+
         if test.status == "interrupted":
-            test.status = "created"
-            test.processed_questions = 0
-            test.success_questions = 0
-            test.failed_questions = 0
-            test.summary_metrics = {}
-            test.started_at = None
-            test.completed_at = None
-            
-            db.commit()
-            db.refresh(test)
-        
+            update_data = {
+                "status": "created",
+                "processed_questions": 0,
+                "success_questions": 0,
+                "failed_questions": 0,
+                "summary_metrics": {},
+                "started_at": None,
+                "completed_at": None,
+            }
+            return crud_performance.update_performance_test(db, db_obj=test, update_data=update_data)
+
         return test
 
-performance_service = PerformanceService() 
+
+performance_service = PerformanceService()

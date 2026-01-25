@@ -4,9 +4,9 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.user_model_config import UserModelConfig
-from app.models.api_key_audit import ApiKeyAudit
 from app.schemas.user_model_config import UserModelConfigCreate, UserModelConfigUpdate
 from app.utils.crypto import encrypt_api_key, decrypt_api_key, hash_api_key, get_key_last4
+from app.crud import user_model_config as crud_user_model_config
 
 
 def create_user_model_config(
@@ -17,30 +17,23 @@ def create_user_model_config(
     encrypted = encrypt_api_key(obj_in.api_key)
     last4 = get_key_last4(obj_in.api_key)
     key_hash = hash_api_key(obj_in.api_key)
-    db_obj = UserModelConfig(
-        user_id=user_id,
-        model_config_id=obj_in.model_config_id,
-        alias=obj_in.alias,
-        key_encrypted=encrypted,
-        key_last4=last4,
-        key_hash=key_hash,
-        is_active=obj_in.is_active,
-    )
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    data = {
+        "model_config_id": obj_in.model_config_id,
+        "alias": obj_in.alias,
+        "key_encrypted": encrypted,
+        "key_last4": last4,
+        "key_hash": key_hash,
+        "is_active": obj_in.is_active,
+    }
+    return crud_user_model_config.create_user_model_config(db, user_id=user_id, data=data)
 
 
 def list_user_model_configs(db: Session, user_id: str) -> List[UserModelConfig]:
-    return db.query(UserModelConfig).filter(UserModelConfig.user_id == user_id).all()
+    return crud_user_model_config.list_user_model_configs(db, user_id)
 
 
 def get_user_model_config(db: Session, user_id: str, config_id: str) -> Optional[UserModelConfig]:
-    return db.query(UserModelConfig).filter(
-        UserModelConfig.id == config_id,
-        UserModelConfig.user_id == user_id,
-    ).first()
+    return crud_user_model_config.get_user_model_config(db, user_id, config_id)
 
 
 def update_user_model_config(
@@ -59,18 +52,11 @@ def update_user_model_config(
     if "is_active" in update_data and update_data["is_active"] is False:
         db_obj.revoked_at = datetime.utcnow()
 
-    for field, value in update_data.items():
-        setattr(db_obj, field, value)
-
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
+    return crud_user_model_config.update_user_model_config(db, db_obj, update_data)
 
 
 def delete_user_model_config(db: Session, db_obj: UserModelConfig) -> None:
-    db.delete(db_obj)
-    db.commit()
+    crud_user_model_config.delete_user_model_config(db, db_obj)
 
 
 def decrypt_user_api_key(
@@ -78,12 +64,11 @@ def decrypt_user_api_key(
     db_obj: UserModelConfig,
 ) -> Tuple[str, UserModelConfig]:
     plaintext = decrypt_api_key(db_obj.key_encrypted)
-    audit = ApiKeyAudit(
-        user_id=db_obj.user_id,
-        model_config_id=db_obj.model_config_id,
-        user_model_config_id=db_obj.id,
-        key_last4=db_obj.key_last4,
-    )
-    db.add(audit)
-    db.commit()
+    audit_data = {
+        "user_id": db_obj.user_id,
+        "model_config_id": db_obj.model_config_id,
+        "user_model_config_id": db_obj.id,
+        "key_last4": db_obj.key_last4,
+    }
+    crud_user_model_config.create_api_key_audit(db, audit_data)
     return plaintext, db_obj

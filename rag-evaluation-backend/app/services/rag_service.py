@@ -5,34 +5,33 @@ import json
 import uuid
 from typing import List, Dict, Any, Optional, Tuple
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.crud import rag as crud_rag
 from app.models.rag_answer import RagAnswer, ApiConfig
 from app.models.question import Question
 from app.schemas.rag_answer import RagAnswerCreate, ApiRequestConfig
 
+
 class RagService:
-    """RAG系统回答收集服务"""
-    
+    """RAG answer collection service."""
+
     def __init__(self, db: Session):
         self.db = db
-        
+
     async def collect_answer_api(
-        self, 
+        self,
         question: Question,
         api_config: ApiRequestConfig,
         source_system: str = "RAG系统",
-        collect_performance: bool = True
+        collect_performance: bool = True,
     ) -> Tuple[Optional[RagAnswer], Optional[str]]:
         """
-        从RAG API收集单个问题的回答
-        返回: (rag_answer, error_message)
+        Collect a single answer from a RAG API.
+        Returns: (rag_answer, error_message)
         """
-        # 替换模板中的问题占位符
         request_data = api_config.request_template.copy()
-        
-        # 递归查找并替换所有{{question}}占位符
+
         def replace_question_placeholder(obj, question_text):
             if isinstance(obj, dict):
                 for key, value in obj.items():
@@ -41,59 +40,49 @@ class RagService:
                     elif isinstance(value, str) and "{{question}}" in value:
                         obj[key] = value.replace("{{question}}", question_text)
                 return obj
-            elif isinstance(obj, list):
+            if isinstance(obj, list):
                 return [replace_question_placeholder(item, question_text) for item in obj]
             return obj
-            
+
         request_data = replace_question_placeholder(request_data, question.question_text)
-        
-        # 准备请求头
-        headers = {
-            "Content-Type": "application/json"
-        }
+
+        headers = {"Content-Type": "application/json"}
         if api_config.api_key:
             headers["Authorization"] = f"Bearer {api_config.api_key}"
-        
+
         if api_config.headers:
             headers.update(api_config.headers)
-        
-        # 性能测量数据
+
         start_time = time.time()
         first_response_time = None
-        
+
         try:
             async with httpx.AsyncClient(timeout=api_config.timeout) as client:
-                # 发送请求
                 response = await client.post(
                     api_config.endpoint_url,
                     headers=headers,
-                    json=request_data
+                    json=request_data,
                 )
-                
-                # 记录首次响应时间
-                first_response_time = int((time.time() - start_time) * 1000)  # 毫秒
-                
+
+                first_response_time = int((time.time() - start_time) * 1000)
+
                 if response.status_code != 200:
                     return None, f"API请求失败: {response.status_code} - {response.text}"
-                
-                # 解析响应
+
                 try:
                     response_json = response.json()
                 except json.JSONDecodeError:
                     return None, "无法解析API响应JSON"
-                
-                # 从响应中提取回答
+
                 answer_text = self._extract_answer_from_response(response_json, api_config.response_path)
                 if not answer_text:
                     return None, f"无法从响应中提取回答，路径: {api_config.response_path}"
-                
-                # 计算性能指标
-                total_response_time = int((time.time() - start_time) * 1000)  # 毫秒
+
+                total_response_time = int((time.time() - start_time) * 1000)
                 character_count = len(answer_text)
                 characters_per_second = character_count / (total_response_time / 1000) if total_response_time > 0 else 0
-                
-                # 创建RagAnswer对象
-                rag_answer_data = RagAnswerCreate(
+
+                RagAnswerCreate(
                     question_id=str(question.id),
                     answer_text=answer_text,
                     collection_method="api",
@@ -102,33 +91,32 @@ class RagService:
                     total_response_time=total_response_time,
                     character_count=character_count,
                     raw_response=response_json,
-                    api_config_id=None  # 此处可以保存ApiConfig的ID，如果有的话
+                    api_config_id=None,
                 )
-                
-                # 保存到数据库
-                db_obj = RagAnswer(
-                    question_id=question.id,
-                    answer_text=answer_text,
-                    collection_method="api",
-                    source_system=source_system,
-                    first_response_time=first_response_time,
-                    total_response_time=total_response_time,
-                    character_count=character_count,
-                    characters_per_second=characters_per_second,
-                    raw_response=response_json,
-                    answer_metadata=None  # 更改字段名
+
+                db_obj = crud_rag.create_rag_answer(
+                    self.db,
+                    data={
+                        "question_id": question.id,
+                        "answer_text": answer_text,
+                        "collection_method": "api",
+                        "source_system": source_system,
+                        "first_response_time": first_response_time,
+                        "total_response_time": total_response_time,
+                        "character_count": character_count,
+                        "characters_per_second": characters_per_second,
+                        "raw_response": response_json,
+                        "answer_metadata": None,
+                    },
                 )
-                self.db.add(db_obj)
-                self.db.commit()
-                self.db.refresh(db_obj)
-                
+
                 return db_obj, None
-                
+
         except httpx.TimeoutException:
             return None, "API请求超时"
-        except Exception as e:
-            return None, f"收集回答时出错: {str(e)}"
-    
+        except Exception as exc:
+            return None, f"收集回答时出错: {str(exc)}"
+
     async def collect_answers_batch(
         self,
         question_ids: List[str],
@@ -136,190 +124,195 @@ class RagService:
         concurrent_requests: int = 1,
         max_attempts: int = 1,
         source_system: str = "RAG系统",
-        collect_performance: bool = True
+        collect_performance: bool = True,
     ) -> Dict[str, Any]:
-        """批量收集多个问题的回答"""
-        # 获取问题列表
-        questions = self.db.query(Question).filter(Question.id.in_(question_ids)).all()
+        """Collect answers for multiple questions."""
+        questions = crud_rag.get_questions_by_ids(self.db, question_ids)
         if not questions:
             return {
                 "success": False,
                 "error": "未找到任何问题",
-                "results": []
+                "results": [],
             }
-        
-        # 创建任务列表
+
         tasks = []
         for question in questions:
             tasks.append(self.collect_answer_api(question, api_config, source_system, collect_performance))
-        
-        # 使用信号量控制并发数
+
         semaphore = asyncio.Semaphore(concurrent_requests)
-        
+
         async def bounded_collect(task):
             async with semaphore:
                 return await task
-        
-        # 执行任务
+
         bounded_tasks = [bounded_collect(task) for task in tasks]
         results = await asyncio.gather(*bounded_tasks)
-        
-        # 处理结果
+
         success_count = 0
         failed_count = 0
         success_results = []
         error_results = []
-        
+
         for (answer, error), question in zip(results, questions):
             if answer:
                 success_count += 1
                 success_results.append({
                     "question_id": str(question.id),
                     "answer_id": str(answer.id),
-                    "success": True
+                    "success": True,
                 })
             else:
                 failed_count += 1
                 error_results.append({
                     "question_id": str(question.id),
                     "success": False,
-                    "error": error
+                    "error": error,
                 })
-        
+
         return {
             "success": True,
             "total": len(questions),
             "success_count": success_count,
             "failed_count": failed_count,
-            "results": success_results + error_results
+            "results": success_results + error_results,
         }
-    
+
     def import_answers_manual(
         self,
         answers: List[Dict[str, Any]],
-        source_system: str = "手动导入"
+        source_system: str = "手动导入",
     ) -> Dict[str, Any]:
-        """手动导入回答"""
+        """Manually import answers."""
         success_count = 0
         failed_count = 0
         results = []
-        
+
         for answer_data in answers:
             try:
                 question_id = answer_data.get("question_id")
                 answer_text = answer_data.get("answer_text")
-                
+
                 if not question_id or not answer_text:
                     failed_count += 1
                     results.append({
                         "question_id": question_id,
                         "success": False,
-                        "error": "问题ID或回答文本缺失"
+                        "error": "问题ID或回答文本缺失",
                     })
                     continue
-                
-                # 检查问题是否存在
-                question = self.db.query(Question).filter(Question.id == question_id).first()
+
+                question = crud_rag.get_question(self.db, question_id)
                 if not question:
                     failed_count += 1
                     results.append({
                         "question_id": question_id,
                         "success": False,
-                        "error": "问题不存在"
+                        "error": "问题不存在",
                     })
                     continue
-                
-                # 创建回答
+
                 character_count = len(answer_text)
-                db_obj = RagAnswer(
-                    question_id=question.id,
-                    answer_text=answer_text,
-                    collection_method="manual",
-                    source_system=source_system,
-                    character_count=character_count,
-                    answer_metadata=answer_data.get("metadata")
+                db_obj = crud_rag.create_rag_answer(
+                    self.db,
+                    data={
+                        "question_id": question.id,
+                        "answer_text": answer_text,
+                        "collection_method": "manual",
+                        "source_system": source_system,
+                        "character_count": character_count,
+                        "answer_metadata": answer_data.get("metadata"),
+                    },
                 )
-                self.db.add(db_obj)
-                self.db.commit()
-                self.db.refresh(db_obj)
-                
+
                 success_count += 1
                 results.append({
                     "question_id": question_id,
                     "answer_id": str(db_obj.id),
-                    "success": True
+                    "success": True,
                 })
-                
-            except Exception as e:
+
+            except Exception as exc:
                 failed_count += 1
                 results.append({
-                    "question_id": answer_data.get("question_id", "未知"),
+                    "question_id": answer_data.get("question_id", "unknown"),
                     "success": False,
-                    "error": str(e)
+                    "error": str(exc),
                 })
-        
+
         return {
             "success": True,
             "total": len(answers),
             "success_count": success_count,
             "failed_count": failed_count,
-            "results": results
+            "results": results,
         }
-    
+
     def _extract_answer_from_response(self, response_json: Dict[str, Any], path: str) -> Optional[str]:
-        """从响应JSON中提取回答文本"""
         try:
-            parts = path.split('.')
+            parts = path.split(".")
             current = response_json
-            
+
             for part in parts:
                 if part in current:
                     current = current[part]
                 else:
                     return None
-            
-            # 确保结果是字符串
-            if isinstance(current, str):
-                return current
-            else:
-                return str(current)
+
+            return current if isinstance(current, str) else str(current)
         except Exception:
             return None
-    
+
     def get_rag_answer(self, answer_id: str) -> Optional[RagAnswer]:
-        """获取单个RAG回答"""
-        return self.db.query(RagAnswer).filter(RagAnswer.id == answer_id).first()
-    
-    def get_answers_by_question(self, question_id: str) -> List[RagAnswer]:
-        """获取问题的所有回答"""
-        return self.db.query(RagAnswer).filter(RagAnswer.question_id == question_id).all()
-    
-    def get_answers_by_project(
-        self, 
-        project_id: str, 
-        skip: int = 0, 
-        limit: int = 100
+        return crud_rag.get_rag_answer(self.db, answer_id)
+
+    def get_answers_by_question(
+        self,
+        question_id: str,
+        version: Optional[str] = None,
     ) -> List[RagAnswer]:
-        """获取项目的所有回答"""
-        # 先获取项目的所有问题ID
-        question_ids = self.db.query(Question.id).filter(Question.project_id == project_id).all()
-        question_ids = [q[0] for q in question_ids]
-        
-        # 然后查询这些问题的回答
-        return self.db.query(RagAnswer).filter(
-            RagAnswer.question_id.in_(question_ids)
-        ).offset(skip).limit(limit).all()
-    
+        return crud_rag.list_answers_by_question(self.db, question_id, version=version)
+
+    def get_answers_by_project(
+        self,
+        project_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[RagAnswer]:
+        return crud_rag.list_answers_by_project(
+            self.db,
+            project_id=project_id,
+            skip=skip,
+            limit=limit,
+        )
+
     def delete_rag_answer(self, answer_id: str) -> bool:
-        """删除RAG回答"""
-        db_obj = self.db.query(RagAnswer).filter(RagAnswer.id == answer_id).first()
-        if not db_obj:
-            return False
-        
-        self.db.delete(db_obj)
-        self.db.commit()
-        return True
-    
+        return crud_rag.delete_rag_answer(self.db, answer_id)
+
+    def get_rag_answer_by_question_and_version(
+        self,
+        question_id: str,
+        version: str,
+    ) -> Optional[RagAnswer]:
+        return crud_rag.get_rag_answer_by_question_and_version(
+            self.db,
+            question_id=question_id,
+            version=version,
+        )
+
+    def create_rag_answer(self, data: Dict[str, Any]) -> RagAnswer:
+        return crud_rag.create_rag_answer(self.db, data=data)
+
+    def update_rag_answer(
+        self,
+        db_obj: RagAnswer,
+        update_data: Dict[str, Any],
+    ) -> RagAnswer:
+        return crud_rag.update_rag_answer(
+            self.db,
+            db_obj=db_obj,
+            update_data=update_data,
+        )
+
     def save_api_config(
         self,
         project_id: str,
@@ -328,61 +321,21 @@ class RagService:
         auth_type: str = "none",
         auth_config: Optional[Dict[str, Any]] = None,
         request_template: Dict[str, Any] = None,
-        headers: Optional[Dict[str, Any]] = None
+        headers: Optional[Dict[str, Any]] = None,
     ) -> ApiConfig:
-        """保存API配置"""
-        db_obj = ApiConfig(
-            project_id=project_id,
-            name=name,
-            endpoint_url=endpoint_url,
-            auth_type=auth_type,
-            auth_config=auth_config or {},
-            request_template=request_template or {},
-            headers=headers or {}
+        return crud_rag.save_api_config(
+            self.db,
+            data={
+                "project_id": project_id,
+                "name": name,
+                "endpoint_url": endpoint_url,
+                "auth_type": auth_type,
+                "auth_config": auth_config or {},
+                "request_template": request_template or {},
+                "headers": headers or {},
+            },
         )
-        self.db.add(db_obj)
-        self.db.commit()
-        self.db.refresh(db_obj)
-        return db_obj 
-    
-    # def get_dataset_versions(self, dataset_id: str) -> List[str]:
-    #     """
-    #     获取数据集下的所有RAG回答版本
-    #     """
-    #     # 通过连接问题表找到属于该数据集的所有RAG回答版本
-    #     versions = self.db.query(RagAnswer.version).join(
-    #         Question, RagAnswer.question_id == Question.id
-    #     ).filter(
-    #         Question.dataset_id == dataset_id,
-    #         RagAnswer.version.isnot(None)  # 排除没有版本信息的回答
-    #     ).distinct().all()
-    #
-    #     # 提取版本字符串并过滤掉None值
-    #     result = [v[0] for v in versions if v[0] is not None]
-    #
-    #     # 如果没有找到版本，返回默认的"v1"版本
-    #     if not result:
-    #         return []
 
     def get_dataset_versions(self, dataset_id: str) -> List[Dict[str, Any]]:
-        """
-        获取数据集下的所有RAG回答版本，以及每个版本的回答数量
-        返回格式: [{"version": "v1", "count": 10}, {"version": "v2", "count": 5}, ...]
-        """
-    # 使用分组和计数聚合查询
-        version_counts = self.db.query(
-            RagAnswer.version,
-            func.count(RagAnswer.id).label('count')
-        ).join(
-            Question, RagAnswer.question_id == Question.id
-        ).filter(
-            Question.dataset_id == dataset_id,
-            RagAnswer.version.isnot(None)  # 排除没有版本信息的回答
-        ).group_by(
-            RagAnswer.version
-        ).all()
-
-        # 转换查询结果为字典列表
-        result = [{"version": v[0], "count": v[1]} for v in version_counts]
-        
-        return result
+        version_counts = crud_rag.get_dataset_version_counts(self.db, dataset_id)
+        return [{"version": v[0], "count": v[1]} for v in version_counts]
