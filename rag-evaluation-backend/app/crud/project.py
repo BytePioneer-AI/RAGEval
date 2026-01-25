@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.models.project import Project, EvaluationDimension
 from app.models.accuracy import AccuracyTest
@@ -19,6 +20,10 @@ def get_project(db: Session, project_id: str) -> Optional[Project]:
     return db.query(Project).filter(Project.id == project_id).first()
 
 
+def list_projects(db: Session) -> List[Project]:
+    return db.query(Project).all()
+
+
 def list_projects_by_user(
     db: Session,
     *,
@@ -34,6 +39,21 @@ def list_projects_by_user(
     if search:
         query = query.filter(Project.name.ilike(f"%{search}%"))
     return query.offset(skip).limit(limit).all()
+
+
+def count_projects_by_user(
+    db: Session,
+    *,
+    user_id: str,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> int:
+    query = db.query(func.count(Project.id)).filter(Project.user_id == user_id)
+    if status:
+        query = query.filter(Project.status == status)
+    if search:
+        query = query.filter(Project.name.ilike(f"%{search}%"))
+    return query.scalar()
 
 
 def list_evaluation_dimensions(db: Session, project_id: str) -> List[EvaluationDimension]:

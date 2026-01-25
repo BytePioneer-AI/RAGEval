@@ -2,11 +2,9 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.api.deps import get_current_user, get_current_active_admin, get_db
 from app.models.user import User
-from app.models.project import Project
 from app.schemas.project import (
     ProjectCreate,
     ProjectUpdate,
@@ -23,6 +21,8 @@ from app.services.project_service import (
     update_project,
     delete_project,
     get_projects_by_user,
+    list_projects,
+    count_projects_by_user,
     update_project_status,
     update_project_dimensions,
     get_project_with_stats
@@ -40,7 +40,7 @@ def read_all_projects(
     获取所有项目（仅管理员可访问）
     """
     # 查询所有项目
-    projects = db.query(Project).all()
+    projects = list_projects(db)
 
     # 转换UUID为字符串
     result = []
@@ -111,15 +111,12 @@ def read_projects(
     )
 
     # 计算总数
-    query = db.query(func.count(Project.id)).filter(Project.user_id == current_user.id)
-
-    if search:
-        query = query.filter(Project.name.ilike(f"%{search}%"))
-
-    if status:
-        query = query.filter(Project.status == status)
-
-    total = query.scalar()
+    total = count_projects_by_user(
+        db,
+        user_id=str(current_user.id),
+        search=search,
+        status=status,
+    )
 
     # 计算总页数
     pages = (total + size - 1) // size if total > 0 else 1

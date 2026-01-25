@@ -51,6 +51,18 @@ def list_accuracy_tests_by_project(db: Session, project_id: str) -> List[Accurac
     ).order_by(AccuracyTest.created_at.desc()).all()
 
 
+def count_accuracy_tests_for_project_dataset(
+    db: Session,
+    *,
+    project_id: str,
+    dataset_id: str,
+) -> int:
+    return db.query(func.count(AccuracyTest.id)).filter(
+        AccuracyTest.project_id == project_id,
+        AccuracyTest.dataset_id == dataset_id,
+    ).scalar()
+
+
 def get_accuracy_test(db: Session, test_id: str) -> Optional[AccuracyTest]:
     return db.query(AccuracyTest).filter(AccuracyTest.id == test_id).first()
 

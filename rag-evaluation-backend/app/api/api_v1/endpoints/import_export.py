@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.schemas.question import QuestionBatchImport
-from app.models.dataset import Dataset
 from app.models.user import User
+from app.services.dataset_service import get_dataset
 from app.services.question_service import import_questions_with_rag_answers
 
 router = APIRouter()
@@ -20,7 +20,7 @@ def import_questions_with_rag_answers_api(
     批量导入问题及其RAG回答
     """
     # 检查数据集是否存在
-    dataset = db.query(Dataset).filter(Dataset.id == import_data.dataset_id).first()
+    dataset = get_dataset(db, dataset_id=import_data.dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="数据集未找到")
     

@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.models.performance import PerformanceTest
 from app.models.rag_answer import RagAnswer
@@ -19,6 +20,18 @@ def list_performance_tests_by_project(db: Session, project_id: str) -> List[Perf
     return db.query(PerformanceTest).filter(
         PerformanceTest.project_id == project_id
     ).order_by(PerformanceTest.created_at.desc()).all()
+
+
+def count_performance_tests_for_project_dataset(
+    db: Session,
+    *,
+    project_id: str,
+    dataset_id: str,
+) -> int:
+    return db.query(func.count(PerformanceTest.id)).filter(
+        PerformanceTest.project_id == project_id,
+        PerformanceTest.dataset_id == dataset_id,
+    ).scalar()
 
 
 def create_performance_test(db: Session, *, data: Dict[str, Any]) -> PerformanceTest:

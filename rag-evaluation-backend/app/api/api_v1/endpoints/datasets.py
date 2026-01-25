@@ -2,7 +2,6 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.api.deps import get_current_user, get_current_active_admin, get_db
 from app.models.user import User
@@ -19,19 +18,24 @@ from app.schemas.common import PaginatedResponse
 from app.services.dataset_service import (
     create_dataset,
     get_dataset,
-    build_dataset_query,
-    get_question_counts_by_dataset_ids,
+    list_all_datasets_with_counts,
+    list_datasets_page,
+    list_public_datasets_page,
     serialize_dataset,
     update_dataset,
     delete_dataset,
+    count_questions_for_dataset,
     get_dataset_with_stats,
     link_dataset_to_project,
     unlink_dataset_from_project,
+    count_project_links_for_dataset,
+    get_project_dataset_link,
     get_questions_by_dataset,
-    copy_dataset
+    copy_dataset,
+    count_accuracy_tests_for_project_dataset,
+    count_performance_tests_for_project_dataset,
 )
-from app.models.question import Question
-from app.models.dataset import Dataset
+from app.services.project_service import get_project
 
 router = APIRouter()
 
@@ -45,22 +49,7 @@ def read_all_datasets(
     获取所有数据集（仅管理员可访问）
     """
     # 查询所有数据集
-    datasets = db.query(Dataset).all()
-
-    # 为每个数据集添加问题数量，并转换UUID为字符串
-    dataset_ids = [dataset.id for dataset in datasets]
-    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
-
-    result = [
-        serialize_dataset(
-            dataset,
-            question_count=question_counts.get(str(dataset.id), 0),
-            mask_user_id=False,
-        )
-        for dataset in datasets
-    ]
-
-    return result
+    return list_all_datasets_with_counts(db)
 
 @router.post("", response_model=DatasetOut)
 def create_dataset_api(
@@ -112,9 +101,11 @@ def read_datasets(
         include_public = False
 
     # 获取数据集列表
-    base_query = build_dataset_query(
+    result = list_datasets_page(
         db,
         user_id=str(current_user.id),
+        skip=skip,
+        limit=size,
         include_public=include_public,
         only_public=only_public,
         only_private=only_private,
@@ -123,37 +114,11 @@ def read_datasets(
         search=search,
     )
 
-    datasets = (
-        base_query
-        .order_by(Dataset.user_id == str(current_user.id), Dataset.created_at.desc())
-        .offset(skip)
-        .limit(size)
-        .all()
-    )
-
-    # 计算总数（需要考虑筛选条件）
-    total = base_query.count()
-
-    # 计算总页数
+    total = result["total"]
     pages = (total + size - 1) // size if total > 0 else 1
 
-    # 准备返回结果
-    dataset_ids = [dataset.id for dataset in datasets]
-    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
-
-    result = [
-        serialize_dataset(
-            dataset,
-            question_count=question_counts.get(str(dataset.id), 0),
-            current_user_id=str(current_user.id),
-            mask_user_id=True,
-            include_is_owner=True,
-        )
-        for dataset in datasets
-    ]
-
     return {
-        "items": result,
+        "items": result["items"],
         "total": total,
         "page": page,
         "size": size,
@@ -176,42 +141,20 @@ def read_public_datasets(
     tag_list = tags.split(",") if tags else None
 
     # 创建基础查询
-    query = build_dataset_query(
+    result = list_public_datasets_page(
         db,
         user_id=str(current_user.id),
-        include_public=True,
-        only_public=True,
+        skip=(page - 1) * size,
+        limit=size,
         tags=tag_list,
         search=search,
     )
 
-    # 计算总数
-    total = query.count()
-
-    # 计算分页
-    offset = (page - 1) * size
-    datasets = query.offset(offset).limit(size).all()
-
-    # 为每个数据集添加问题数量，并转换UUID为字符串
-    dataset_ids = [dataset.id for dataset in datasets]
-    question_counts = get_question_counts_by_dataset_ids(db, dataset_ids)
-
-    result = [
-        serialize_dataset(
-            dataset,
-            question_count=question_counts.get(str(dataset.id), 0),
-            current_user_id=str(current_user.id),
-            mask_user_id=True,
-        )
-        for dataset in datasets
-    ]
-
-    # 计算总页数
+    total = result["total"]
     pages = (total + size - 1) // size if total > 0 else 1
 
-    # 返回分页结果
     return {
-        "items": result,
+        "items": result["items"],
         "total": total,
         "page": page,
         "size": size,
@@ -271,10 +214,8 @@ def update_dataset_api(
 
     dataset = update_dataset(db, dataset_id=dataset_id, obj_in=dataset_in)
 
-    # 获取问题数量
-    question_count = db.query(func.count(Question.id)).filter(
-        Question.dataset_id == dataset.id
-    ).scalar()
+    # ???????
+    question_count = count_questions_for_dataset(db, dataset_id=str(dataset.id))
 
     # 手动转换返回值，确保UUID被转换为字符串
     return serialize_dataset(dataset, question_count=question_count, mask_user_id=False)
@@ -298,10 +239,7 @@ def delete_dataset_api(
         raise HTTPException(status_code=403, detail="无权删除此数据集")
 
     # 检查是否有项目正在使用此数据集
-    from app.models.dataset import ProjectDataset
-    project_links = db.query(ProjectDataset).filter(
-        ProjectDataset.dataset_id == dataset_id
-    ).count()
+    project_links = count_project_links_for_dataset(db, dataset_id=dataset_id)
 
     if project_links > 0:
         raise HTTPException(status_code=400, detail="数据集正在被项目使用，无法删除")
@@ -323,8 +261,7 @@ def link_datasets_to_project(
     批量关联数据集到项目
     """
     # 检查项目权限
-    from app.models.project import Project
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = get_project(db, project_id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
 
@@ -369,8 +306,7 @@ def unlink_dataset_from_project_api(
     从项目中移除数据集关联
     """
     # 检查项目权限
-    from app.models.project import Project
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = get_project(db, project_id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
 
@@ -378,21 +314,17 @@ def unlink_dataset_from_project_api(
         raise HTTPException(status_code=403, detail="无权操作此项目")
 
     # 检查关联是否存在
-    from app.models.dataset import ProjectDataset
-    link = db.query(ProjectDataset).filter(
-        ProjectDataset.project_id == project_id,
-        ProjectDataset.dataset_id == dataset_id
-    ).first()
+    link = get_project_dataset_link(db, project_id=project_id, dataset_id=dataset_id)
 
     if not link:
         raise HTTPException(status_code=404, detail="项目未关联此数据集")
 
     # 检查是否有使用此数据集的精度评测结果
-    from app.models.accuracy import AccuracyTest
-    accuracy_tests = db.query(AccuracyTest).filter(
-        AccuracyTest.project_id == project_id,
-        AccuracyTest.dataset_id == dataset_id
-    ).count()
+    accuracy_tests = count_accuracy_tests_for_project_dataset(
+        db,
+        project_id=project_id,
+        dataset_id=dataset_id,
+    )
 
     if accuracy_tests > 0:
         raise HTTPException(
@@ -401,11 +333,11 @@ def unlink_dataset_from_project_api(
         )
 
     # 检查是否有使用此数据集的性能评测结果
-    from app.models.performance import PerformanceTest
-    performance_tests = db.query(PerformanceTest).filter(
-        PerformanceTest.project_id == project_id,
-        PerformanceTest.dataset_id == dataset_id
-    ).count()
+    performance_tests = count_performance_tests_for_project_dataset(
+        db,
+        project_id=project_id,
+        dataset_id=dataset_id,
+    )
 
     if performance_tests > 0:
         raise HTTPException(
@@ -494,9 +426,7 @@ def copy_dataset_api(
         raise HTTPException(status_code=500, detail="复制数据集失败")
 
     # 获取问题数量
-    question_count = db.query(func.count(Question.id)).filter(
-        Question.dataset_id == new_dataset.id
-    ).scalar()
+    question_count = count_questions_for_dataset(db, dataset_id=str(new_dataset.id))
 
     # 返回响应
     return serialize_dataset(new_dataset, question_count=question_count, mask_user_id=False)

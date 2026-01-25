@@ -5,8 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
-from app.models.project import Project
-from app.models.question import Question
 from app.schemas.question import (
     QuestionCreate, 
     QuestionUpdate, 
@@ -21,6 +19,7 @@ from app.services.question_service import (
     delete_question,
     create_questions_batch
 )
+from app.services.project_service import get_project
 
 router = APIRouter()
 
@@ -37,7 +36,7 @@ def create_question_api(
     # 检查项目权限
     print("********************")
     print(f"{question_in.project_id}")
-    project = db.query(Project).filter(Project.id == question_in.project_id).first()
+    project = get_project(db, project_id=question_in.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
     if project.user_id != current_user.id and not current_user.is_admin:
@@ -58,7 +57,7 @@ def create_questions_batch_api(
     批量创建问题
     """
     # 检查项目权限
-    project = db.query(Project).filter(Project.id == questions_in.project_id).first()
+    project = get_project(db, project_id=questions_in.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
     if project.user_id != current_user.id and not current_user.is_admin:
@@ -81,7 +80,7 @@ def read_questions(
     获取项目中的所有问题
     """
     # 检查项目权限
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = get_project(db, project_id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
     if project.user_id != current_user.id and not current_user.is_admin:
@@ -110,7 +109,7 @@ def read_question(
         raise HTTPException(status_code=404, detail="问题未找到")
     
     # 检查项目权限
-    project = db.query(Project).filter(Project.id == question.project_id).first()
+    project = get_project(db, project_id=question.project_id)
     if project.user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="无权限查看此问题")
     
@@ -132,7 +131,7 @@ def update_question_api(
         raise HTTPException(status_code=404, detail="问题未找到")
     
     # 检查项目权限
-    project = db.query(Project).filter(Project.id == question.project_id).first()
+    project = get_project(db, project_id=question.project_id)
     if project.user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="无权限更新此问题")
     
@@ -154,7 +153,7 @@ def delete_question_api(
         raise HTTPException(status_code=404, detail="问题未找到")
     
     # 检查项目权限
-    project = db.query(Project).filter(Project.id == question.project_id).first()
+    project = get_project(db, project_id=question.project_id)
     if project.user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="无权限删除此问题")
     

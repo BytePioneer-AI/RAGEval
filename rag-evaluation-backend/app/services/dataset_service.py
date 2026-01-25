@@ -4,6 +4,8 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.crud import dataset as crud_dataset
+from app.crud import accuracy as crud_accuracy
+from app.crud import performance as crud_performance
 from app.models.dataset import Dataset, ProjectDataset
 from app.models.question import Question
 from app.schemas.dataset import DatasetCreate, DatasetUpdate
@@ -72,6 +74,21 @@ def get_question_counts_by_dataset_ids(
     return crud_dataset.get_question_counts_by_dataset_ids(db, dataset_ids)
 
 
+def list_all_datasets_with_counts(db: Session) -> List[Dict[str, Any]]:
+    datasets = crud_dataset.list_all_datasets(db)
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = crud_dataset.get_question_counts_by_dataset_ids(db, dataset_ids)
+
+    return [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            mask_user_id=False,
+        )
+        for dataset in datasets
+    ]
+
+
 def create_dataset(db: Session, obj_in: DatasetCreate, user_id: str) -> Dataset:
     obj_in_data = jsonable_encoder(obj_in)
     return crud_dataset.create_dataset(db, data=obj_in_data, user_id=user_id)
@@ -107,6 +124,54 @@ def get_datasets_by_user(
     )
 
 
+def list_datasets_page(
+    db: Session,
+    *,
+    user_id: str,
+    skip: int,
+    limit: int,
+    include_public: bool = True,
+    only_public: bool = False,
+    only_private: bool = False,
+    only_mine: bool = False,
+    tags: Optional[List[str]] = None,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    query = crud_dataset._build_dataset_query(
+        db,
+        user_id=user_id,
+        include_public=include_public,
+        only_public=only_public,
+        only_private=only_private,
+        only_mine=only_mine,
+        tags=tags,
+        search=search,
+    )
+
+    query = query.order_by(Dataset.user_id == user_id, Dataset.created_at.desc())
+    total = query.count()
+    datasets = query.offset(skip).limit(limit).all()
+
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = crud_dataset.get_question_counts_by_dataset_ids(db, dataset_ids)
+
+    items = [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            current_user_id=user_id,
+            mask_user_id=True,
+            include_is_owner=True,
+        )
+        for dataset in datasets
+    ]
+
+    return {
+        "items": items,
+        "total": total,
+    }
+
+
 def get_public_datasets(
     db: Session,
     skip: int = 0,
@@ -114,6 +179,48 @@ def get_public_datasets(
     tags: Optional[List[str]] = None,
 ) -> List[Dataset]:
     return crud_dataset.list_public_datasets(db, skip=skip, limit=limit, tags=tags)
+
+
+def list_public_datasets_page(
+    db: Session,
+    *,
+    user_id: str,
+    skip: int,
+    limit: int,
+    tags: Optional[List[str]] = None,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    query = crud_dataset._build_dataset_query(
+        db,
+        user_id=user_id,
+        include_public=True,
+        only_public=True,
+        only_private=False,
+        only_mine=False,
+        tags=tags,
+        search=search,
+    )
+
+    total = query.count()
+    datasets = query.offset(skip).limit(limit).all()
+
+    dataset_ids = [dataset.id for dataset in datasets]
+    question_counts = crud_dataset.get_question_counts_by_dataset_ids(db, dataset_ids)
+
+    items = [
+        serialize_dataset(
+            dataset,
+            question_count=question_counts.get(str(dataset.id), 0),
+            current_user_id=user_id,
+            mask_user_id=True,
+        )
+        for dataset in datasets
+    ]
+
+    return {
+        "items": items,
+        "total": total,
+    }
 
 
 def update_dataset(
@@ -127,6 +234,10 @@ def update_dataset(
 
     update_data = obj_in.dict(exclude_unset=True)
     return crud_dataset.update_dataset(db, db_obj, update_data)
+
+
+def count_questions_for_dataset(db: Session, dataset_id: str) -> int:
+    return crud_dataset.count_questions_for_dataset(db, dataset_id)
 
 
 def delete_dataset(db: Session, dataset_id: str) -> bool:
@@ -182,6 +293,22 @@ def unlink_dataset_from_project(
     )
 
 
+def count_project_links_for_dataset(db: Session, dataset_id: str) -> int:
+    return crud_dataset.count_project_links_for_dataset(db, dataset_id)
+
+
+def get_project_dataset_link(
+    db: Session,
+    project_id: str,
+    dataset_id: str,
+) -> Optional[ProjectDataset]:
+    return crud_dataset.get_project_dataset_link(
+        db,
+        project_id=project_id,
+        dataset_id=dataset_id,
+    )
+
+
 def get_datasets_by_project(db: Session, project_id: str) -> List[Dataset]:
     return crud_dataset.list_datasets_by_project(db, project_id)
 
@@ -215,6 +342,30 @@ def copy_dataset(
         source_dataset_id=source_dataset_id,
         user_id=user_id,
         new_name=new_name,
+    )
+
+
+def count_accuracy_tests_for_project_dataset(
+    db: Session,
+    project_id: str,
+    dataset_id: str,
+) -> int:
+    return crud_accuracy.count_accuracy_tests_for_project_dataset(
+        db,
+        project_id=project_id,
+        dataset_id=dataset_id,
+    )
+
+
+def count_performance_tests_for_project_dataset(
+    db: Session,
+    project_id: str,
+    dataset_id: str,
+) -> int:
+    return crud_performance.count_performance_tests_for_project_dataset(
+        db,
+        project_id=project_id,
+        dataset_id=dataset_id,
     )
 
 

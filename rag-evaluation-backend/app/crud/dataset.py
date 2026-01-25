@@ -86,6 +86,10 @@ def get_dataset(db: Session, dataset_id: str) -> Optional[Dataset]:
     return db.query(Dataset).filter(Dataset.id == dataset_id).first()
 
 
+def list_all_datasets(db: Session) -> List[Dataset]:
+    return db.query(Dataset).all()
+
+
 def list_datasets_by_user(
     db: Session,
     *,
@@ -179,6 +183,18 @@ def link_dataset_to_project(
     return db_obj
 
 
+def get_project_dataset_link(
+    db: Session,
+    *,
+    project_id: str,
+    dataset_id: str,
+) -> Optional[ProjectDataset]:
+    return db.query(ProjectDataset).filter(
+        ProjectDataset.project_id == project_id,
+        ProjectDataset.dataset_id == dataset_id,
+    ).first()
+
+
 def unlink_dataset_from_project(
     db: Session,
     *,
@@ -196,6 +212,12 @@ def unlink_dataset_from_project(
     db.delete(db_obj)
     db.commit()
     return True
+
+
+def count_project_links_for_dataset(db: Session, dataset_id: str) -> int:
+    return db.query(func.count(ProjectDataset.id)).filter(
+        ProjectDataset.dataset_id == dataset_id
+    ).scalar()
 
 
 def list_datasets_by_project(db: Session, project_id: str) -> List[Dataset]:

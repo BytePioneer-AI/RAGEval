@@ -32,6 +32,11 @@ def get_project(db: Session, project_id: str) -> Optional[Project]:
     """通过ID获取项目"""
     return crud_project.get_project(db, project_id)
 
+
+def list_projects(db: Session) -> List[Project]:
+    """鑾峰彇鎵€鏈夐」鐩?"""
+    return crud_project.list_projects(db)
+
 def get_project_with_dimensions(db: Session, project_id: str, user_id: str) -> Optional[ProjectWithDimensions]:
     """获取项目详情，包括评测维度"""
     project = get_project(db, project_id)
@@ -92,6 +97,21 @@ def get_projects_by_user(
         user_id=user_id,
         skip=skip,
         limit=limit,
+        status=status,
+        search=search,
+    )
+
+
+def count_projects_by_user(
+    db: Session,
+    *,
+    user_id: str,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> int:
+    return crud_project.count_projects_by_user(
+        db,
+        user_id=user_id,
         status=status,
         search=search,
     )
