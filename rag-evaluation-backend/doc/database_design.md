@@ -24,24 +24,7 @@
 
 ---
 
-## 🟢 2. API 密钥表 (`api_keys`)
-
-**业务含义**：存储用户配置的第三方 LLM 服务 API 密钥。
-
-| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
-| :----- | :--- | :--- | :----- | :------------- |
-| `id` | UUID | YES | uuid4 | 主键 |
-| `user_id` | UUID | YES | - | 外键 → `users.id`，级联删除 |
-| `name` | VARCHAR(100) | YES | - | 密钥名称，便于用户识别 |
-| `key` | VARCHAR(100) | YES | - | API 密钥值，唯一索引 |
-| `provider` | VARCHAR(50) | YES | - | 服务提供商：`openai`、`anthropic` 等 |
-| `is_active` | BOOLEAN | NO | TRUE | 密钥是否启用 |
-| `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
-| `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
-
----
-
-## 🟢 2.1 模型配置表 (`model_configs`)
+## 🟢 2. 模型配置表 (`model_configs`)
 
 **业务含义**：存储可复用的模型配置元数据，用于多厂商路由与默认参数管理。
 
@@ -61,7 +44,7 @@
 
 ---
 
-## 🟢 2.2 用户模型密钥绑定表 (`user_model_configs`)
+## 🟢 2.1 用户模型密钥绑定表 (`user_model_configs`)
 
 **业务含义**：用户与模型配置的多对多绑定，保存加密后的 API Key 与状态信息。
 
@@ -79,21 +62,6 @@
 | `revoked_at` | TIMESTAMPTZ | NO | NULL | 撤销时间 |
 | `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
-
----
-
-## 🟢 2.3 API Key 使用审计表 (`api_key_audits`)
-
-**业务含义**：记录 API Key 的使用审计信息。
-
-| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
-| :----- | :--- | :--- | :----- | :------------- |
-| `id` | UUID | YES | uuid4 | 主键 |
-| `user_id` | UUID | YES | - | 外键 → users.id |
-| `model_config_id` | UUID | NO | NULL | 外键 → model_configs.id |
-| `user_model_config_id` | UUID | NO | NULL | 外键 → user_model_configs.id |
-| `key_last4` | VARCHAR(4) | NO | NULL | 密钥末 4 位 |
-| `created_at` | TIMESTAMPTZ | NO | NOW() | 使用时间 |
 
 ---
 
@@ -414,13 +382,9 @@
 
 ```mermaid
 erDiagram
-    users ||--o{ api_keys : "拥有"
     users ||--o{ model_configs : "创建"
     users ||--o{ user_model_configs : "拥有"
-    users ||--o{ api_key_audits : "使用"
     model_configs ||--o{ user_model_configs : "绑定"
-    model_configs ||--o{ api_key_audits : "引用"
-    user_model_configs ||--o{ api_key_audits : "使用"
     users ||--o{ projects : "创建"
     users ||--o{ datasets : "创建"
     users ||--o{ reports : "创建"
@@ -460,15 +424,6 @@ erDiagram
         BOOLEAN is_active
         BOOLEAN is_admin
     }
-    
-    api_keys {
-        UUID id PK
-        UUID user_id FK
-        VARCHAR name
-        VARCHAR key UK
-        VARCHAR provider
-        BOOLEAN is_active
-    }
 
     model_configs {
         UUID id PK
@@ -489,14 +444,6 @@ erDiagram
         TEXT key_encrypted
         VARCHAR key_last4
         BOOLEAN is_active
-    }
-
-    api_key_audits {
-        UUID id PK
-        UUID user_id FK
-        UUID model_config_id FK
-        UUID user_model_config_id FK
-        VARCHAR key_last4
     }
     
     projects {
@@ -725,13 +672,9 @@ sequenceDiagram
 
 | 子表 | 外键字段 | 父表 | 删除行为 |
 | :--- | :------- | :--- | :------- |
-| `api_keys` | `user_id` | `users` | CASCADE |
 | `model_configs` | `created_by` | `users` | SET NULL |
 | `user_model_configs` | `user_id` | `users` | CASCADE |
 | `user_model_configs` | `model_config_id` | `model_configs` | CASCADE |
-| `api_key_audits` | `user_id` | `users` | CASCADE |
-| `api_key_audits` | `model_config_id` | `model_configs` | SET NULL |
-| `api_key_audits` | `user_model_config_id` | `user_model_configs` | SET NULL |
 | `projects` | `user_id` | `users` | CASCADE |
 | `datasets` | `user_id` | `users` | CASCADE |
 | `evaluation_dimensions` | `project_id` | `projects` | CASCADE |

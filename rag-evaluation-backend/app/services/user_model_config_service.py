@@ -64,11 +64,4 @@ def decrypt_user_api_key(
     db_obj: UserModelConfig,
 ) -> Tuple[str, UserModelConfig]:
     plaintext = decrypt_api_key(db_obj.key_encrypted)
-    audit_data = {
-        "user_id": db_obj.user_id,
-        "model_config_id": db_obj.model_config_id,
-        "user_model_config_id": db_obj.id,
-        "key_last4": db_obj.key_last4,
-    }
-    crud_user_model_config.create_api_key_audit(db, audit_data)
     return plaintext, db_obj

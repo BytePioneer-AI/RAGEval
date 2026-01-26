@@ -3,7 +3,6 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from app.models.user_model_config import UserModelConfig
-from app.models.api_key_audit import ApiKeyAudit
 
 
 def create_user_model_config(
@@ -46,10 +45,3 @@ def update_user_model_config(
 def delete_user_model_config(db: Session, db_obj: UserModelConfig) -> None:
     db.delete(db_obj)
     db.commit()
-
-
-def create_api_key_audit(db: Session, audit_data: Dict[str, Any]) -> ApiKeyAudit:
-    audit = ApiKeyAudit(**audit_data)
-    db.add(audit)
-    db.commit()
-    return audit
