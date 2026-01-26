@@ -190,8 +190,8 @@
 | `category` | VARCHAR(50) | NO | NULL | 问题分类：`事实型`、`推理型` 等 |
 | `difficulty` | VARCHAR(20) | NO | NULL | 难度级别：`简单`、`中等`、`困难` |
 | `type` | VARCHAR(50) | NO | NULL | 问题类型 |
-| `tags` | JSONB | NO | NULL | 问题标签 |
-| `question_metadata` | JSONB | NO | NULL | 问题元数据 |
+| `tags` | JSONB | NO | [] | 问题标签 |
+| `question_metadata` | JSONB | NO | {} | 问题元数据 |
 | `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
 
@@ -252,9 +252,9 @@
 | `dataset_id` | UUID | YES | - | 外键 → `datasets.id`，级联删除 |
 | `name` | VARCHAR(255) | YES | - | 评测名称 |
 | `description` | TEXT | NO | NULL | 评测描述 |
-| `evaluation_type` | VARCHAR(20) | YES | - | 评测类型：`auto`、`manual`、`hybrid` |
+| `evaluation_type` | VARCHAR(20) | YES | - | 评测类型：`ai`、`manual`、`hybrid` |
 | `scoring_method` | VARCHAR(20) | YES | - | 评分方法 |
-| `status` | VARCHAR(20) | YES | 'created' | 状态：`created`、`running`、`completed`、`failed` |
+| `status` | VARCHAR(20) | YES | 'created' | 状态：`created`、`running`、`completed`、`failed`、`interrupted` |
 | `dimensions` | JSONB | YES | ["accuracy"] | 评测维度列表 |
 | `weights` | JSONB | NO | {"accuracy": 1.0} | 维度权重配置 |
 | `model_config_test` | JSONB | NO | NULL | 模型配置 |
@@ -284,7 +284,7 @@
 | `evaluation_id` | UUID | YES | - | 外键 → `accuracy_test.id`，级联删除 |
 | `question_id` | UUID | YES | - | 外键 → `questions.id` |
 | `rag_answer_id` | UUID | YES | - | 外键 → `rag_answers.id` |
-| `status` | VARCHAR(20) | NO | 'pending' | 状态：`pending`、`completed`、`failed` |
+| `status` | VARCHAR(20) | NO | 'pending' | 状态：`pending`、`ai_completed`、`human_completed`、`both_completed`、`failed` |
 | `final_score` | NUMERIC | NO | NULL | 最终评分 |
 | `final_dimension_scores` | JSONB | NO | NULL | 各维度最终评分 |
 | `final_evaluation_reason` | TEXT | NO | NULL | 最终评价理由 |
@@ -363,10 +363,10 @@
 
 | 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
 | :----- | :--- | :--- | :----- | :------------- |
-| `id` | UUID | YES | uuid4 | 主键 |
+| `id` | UUID | YES | gen_random_uuid() | 主键 |
 | `user_id` | UUID | YES | - | 外键 → `users.id`，级联删除 |
 | `project_id` | UUID | YES | - | 外键 → `projects.id`，级联删除 |
-| `title` | VARCHAR(200) | YES | - | 报告标题 |
+| `title` | VARCHAR(255) | YES | - | 报告标题 |
 | `description` | TEXT | NO | NULL | 报告描述 |
 | `report_type` | VARCHAR(50) | YES | - | 报告类型：`evaluation`（评测）、`performance`（性能）、`comparison`（对比） |
 | `public` | BOOLEAN | NO | FALSE | 是否公开 |
@@ -374,6 +374,39 @@
 | `content` | JSONB | NO | NULL | 报告内容 |
 | `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
 | `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
+
+---
+
+## 🟢 15. 系统设置表 (`system_settings`)
+
+**业务含义**：用户级系统设置，存储键值对配置。
+
+| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
+| :----- | :--- | :--- | :----- | :------------- |
+| `id` | UUID | YES | uuid4 | 主键 |
+| `user_id` | UUID | YES | - | 外键 → `users.id`，级联删除 |
+| `key` | VARCHAR(50) | YES | - | 配置键 |
+| `value` | TEXT | NO | NULL | 配置值 |
+| `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | NO | NOW() | 更新时间 |
+
+**约束**：`(user_id, key)` 联合唯一约束
+
+---
+
+## 🟢 16. 项目共享表 (`shared_projects`)
+
+**业务含义**：项目共享关系表，记录用户对项目的访问权限。
+
+| 字段名 | 类型 | 必填 | 默认值 | 业务含义与逻辑 |
+| :----- | :--- | :--- | :----- | :------------- |
+| `id` | UUID | YES | uuid4 | 主键 |
+| `project_id` | UUID | YES | - | 外键 → `projects.id`，级联删除 |
+| `user_id` | UUID | YES | - | 外键 → `users.id`，级联删除 |
+| `permission` | VARCHAR(20) | YES | 'read' | 权限类型：`read`、`write` 等 |
+| `created_at` | TIMESTAMPTZ | NO | NOW() | 创建时间 |
+
+**约束**：`(project_id, user_id)` 联合唯一约束
 
 ---
 
@@ -391,12 +424,15 @@ erDiagram
     users ||--o{ projects : "创建"
     users ||--o{ datasets : "创建"
     users ||--o{ reports : "创建"
+    users ||--o{ system_settings : "设置"
+    users ||--o{ shared_projects : "共享"
     
     projects ||--o{ evaluation_dimensions : "包含"
     projects ||--o{ project_datasets : "关联"
     projects ||--o{ api_configs : "配置"
     projects ||--o{ accuracy_test : "包含"
     projects ||--o{ reports : "生成"
+    projects ||--o{ shared_projects : "共享"
     
     datasets ||--o{ project_datasets : "被关联"
     datasets ||--o{ questions : "包含"
@@ -578,6 +614,20 @@ erDiagram
         JSONB content
         BOOLEAN public
     }
+
+    system_settings {
+        UUID id PK
+        UUID user_id FK
+        VARCHAR key
+        TEXT value
+    }
+
+    shared_projects {
+        UUID id PK
+        UUID project_id FK
+        UUID user_id FK
+        VARCHAR permission
+    }
 ```
 
 ---
@@ -700,12 +750,17 @@ sequenceDiagram
 | `accuracy_human_assignments` | `created_by` | `users` | SET NULL |
 | `reports` | `user_id` | `users` | CASCADE |
 | `reports` | `project_id` | `projects` | CASCADE |
+| `system_settings` | `user_id` | `users` | CASCADE |
+| `shared_projects` | `project_id` | `projects` | CASCADE |
+| `shared_projects` | `user_id` | `users` | CASCADE |
 
 ---
 
 ## 📝 备注
 
-1. 所有主键均使用 UUID 类型，通过 `StringUUID` 自定义类型实现跨数据库兼容
+1. 主键使用 PostgreSQL UUID；`uuid_generate_v4()` 来自 `uuid-ossp` 扩展，`reports.id` 使用 `gen_random_uuid()`。
 2. 时间字段统一使用带时区的 `TIMESTAMPTZ` 类型
 3. `rag_answers.question_id` 和 `performance_tests.project_id/dataset_id` 在模型层未定义外键约束，需在应用层保证数据一致性
 4. JSONB 类型字段用于存储灵活的配置和元数据信息
+5. `reports` 和 `datasets` 表通过触发器在更新时自动刷新 `updated_at`
+6. 初始迁移包含默认管理员用户的插入
