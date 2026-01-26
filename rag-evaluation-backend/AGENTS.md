@@ -19,6 +19,8 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 # Repository Guidelines
 
+- **语言**：所有对话与说明一律使用中文。
+
 ## 项目结构与模块组织
 - `app/` 为 FastAPI 应用主体：`api/` 路由、`services/` 业务逻辑、`models/` 与 `schemas/` 数据模型与校验、`core/` 配置与安全、`utils/` 工具函数。
 - `alembic/` 与 `alembic.ini` 用于数据库迁移；版本文件在 `alembic/versions/`。

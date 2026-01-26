@@ -23,7 +23,7 @@ def upgrade() -> None:
     # 1. users 表
     op.create_table(
         'users',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('uuid_generate_v4()')),
+        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('email', sa.String(255), unique=True, nullable=False),
         sa.Column('password_hash', sa.String(255), nullable=False),
         sa.Column('name', sa.String(100)),
