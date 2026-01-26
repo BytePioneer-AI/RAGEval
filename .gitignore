@@ -43,6 +43,7 @@ rag-evaluation-backend/app/core/config.py
 *.swp
 *~
 /.vscode/
+**/.vscode/
 
 # 添加以下内容到.gitignore文件
 docker/nginx/cert/
