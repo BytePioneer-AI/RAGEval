@@ -129,16 +129,17 @@ class PerformanceService:
         def calculate_percentiles(data):
             if not data:
                 return None
+            data_float = [float(x) for x in data]
             return {
-                "avg": float(np.mean(data)),
-                "max": float(np.max(data)),
-                "min": float(np.min(data)),
-                "p50": float(np.percentile(data, 50)),
-                "p75": float(np.percentile(data, 75)),
-                "p90": float(np.percentile(data, 90)),
-                "p95": float(np.percentile(data, 95)),
-                "p99": float(np.percentile(data, 99)),
-                "samples": len(data),
+                "avg": float(np.mean(data_float)),
+                "max": float(np.max(data_float)),
+                "min": float(np.min(data_float)),
+                "p50": float(np.percentile(data_float, 50)),
+                "p75": float(np.percentile(data_float, 75)),
+                "p90": float(np.percentile(data_float, 90)),
+                "p95": float(np.percentile(data_float, 95)),
+                "p99": float(np.percentile(data_float, 99)),
+                "samples": len(data_float),
             }
 
         return {

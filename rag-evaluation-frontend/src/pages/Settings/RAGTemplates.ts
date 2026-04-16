@@ -76,9 +76,9 @@ export const RAG_TEMPLATES = [
   "messages": [{"role": "user", "content": "{{question}}"}],
   "stream": true
 }`,
-      responsePath: 'choices[0].delta.content',
-      streamEventField: 'choices',
-      streamEventValue: 'delta'
+      responsePath: 'choices.0.delta.content',
+      streamEventField: 'object',
+      streamEventValue: 'chat.completion.chunk',
     }
   }
 ];
